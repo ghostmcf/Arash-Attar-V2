@@ -1,0 +1,32 @@
+On Django Rest > Paginations > PageNumberPagination :
+#Page_size Added
+
+class PageNumberPagination(BasePagination):
+    .
+    .
+    .
+    # Client can control the page size using this query parameter.
+    # Default is 'None'. Set to eg 'page_size' to enable usage.
+    page_size_query_param = 'page_size'
+    page_size_query_description = _('Number of results to return per page.')
+    .
+    .
+    .
+
+
+#######
+On Django Rest > Auth Token > Views : 
+
+def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data['user']
+        ##
+        password = serializer.validated_data['password']
+        ##
+        token, created = Token.objects.get_or_create(user=user)
+        ##////
+        usr = authenticate(request, username=user, password=password)
+        login(request, user)
+        #/////
+        return Response({'token': token.key,'memo_cache':user.is_superuser})
