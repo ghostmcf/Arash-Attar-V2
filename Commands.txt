@@ -1,6 +1,0 @@
-### Clear Migration Cache
-Get-ChildItem -Recurse -Include *.py | Where-Object { $_.FullName -match "migrations" -and $_.Name -ne "__init__.py" } | Remove-Item -Force; Get-ChildItem -Recurse -Include *.pyc | Remove-Item -Force; Get-ChildItem -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force
-
-
-### Github API
-https://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@github.com/ghostmcf/Arash-Attar-V2.git
