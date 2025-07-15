@@ -85,3 +85,4 @@ wcwidth
 XlsxWriter
 yarl
 zope.interface
+PyMuPDF

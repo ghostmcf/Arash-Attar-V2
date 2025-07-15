@@ -1,0 +1,17 @@
+Commands.txt
+.venv/
+AssignmentPlatform/__pycache__/
+ClassroomsPlatform/__pycache__/
+ExamsPlatform/__pycache__/
+Frontend/__pycache__/
+ManagementApp/__pycache__/
+site1/__pycache__/
+StudentsInfo/__pycache__/
+**/__pycache__
+**/migrations/*
+**\__pycache__
+__pycache__
+!**/migrations/__init__.py
+Storage/
+.VSCodeCounter
+info.log
