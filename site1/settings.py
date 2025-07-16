@@ -113,44 +113,62 @@ REST_FRAMEWORK ={
 # Database
 # https://docs.djangoproject.com/en/4.0/ref/settings/#databases
 
+### Normal DB Configs
 
-DATABASES = {  
-    'default': {  
-        'ENGINE': 'django.db.backends.mysql',  
-        'NAME': 'mindesca_arash',  
-        'USER': 'mindesca_attar',  
-        'PASSWORD': 'hCgr7=^pmFAwk9%X',  
-        'HOST': '127.0.0.1',  
-        'PORT': '3306',  
-        'OPTIONS': {  
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-            'charset': 'utf8mb4'
-        }  
-    }  
-} 
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': 'arashat1_arash',
-#         'USER': 'arashat1_me',
-#         'PASSWORD': '%MfTxAB08=jG5QO@',
-#         'HOST': '127.0.0.1',
-#         'PORT': '5432',
+# DATABASES = {  
+#     'default': {  
+#         'ENGINE': 'django.db.backends.mysql',  
+#         'NAME': 'mindesca_arash',  
+#         'USER': 'mindesca_attar',  
+#         'PASSWORD': 'hCgr7=^pmFAwk9%X',  
+#         'HOST': '127.0.0.1',  
+#         'PORT': '3306',  
+#         'OPTIONS': {  
+#             'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+#             'charset': 'utf8mb4'
+#         }  
+#     }  
+# } 
+
+# CACHES = {
+#     "default": {
+#         "BACKEND": "django_redis.cache.RedisCache",
+#         "LOCATION": "unix:/home/arashat1/redis/redis.sock?db=0",
+#         "OPTIONS": {
+#             "CLIENT_CLASS": "django_redis.client.DefaultClient",
+#         }
 #     }
 # }
+
+
+### RUNFLARE DB Configs
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'maindbgqw_db',
+        'USER': 'postgres',
+        'PASSWORD': 'ps!evVUpoRRj6vYN26Zf',
+        'HOST': 'maindb-mfw-service',
+        'PORT': '5432',
+    }
+}
 
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "unix:/home/arashat1/redis/redis.sock?db=0",
+        "LOCATION": "redis://default:qO33pfoBp$2NfXNhSoBo@cachedb-ign-service:6379/0",
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         }
     }
 }
 
-SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
-SESSION_CACHE_ALIAS = 'default'
+SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+SESSION_CACHE_ALIAS = "default"
+
+# CELERY_BROKER_URL = "redis://default:qO33pfoBp$2NfXNhSoBo@cachedb-ign-service:6379/0"
+
 
 CRONJOBS = [
     ('*/0 * * * *', 'ExamsPlatform.exam_release')

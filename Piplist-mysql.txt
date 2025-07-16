@@ -54,7 +54,6 @@ pandas
 pillow
 platformdirs
 prompt_toolkit
-psycopg2-binary
 pyasn1
 pyasn1_modules
 pycparser
@@ -86,3 +85,6 @@ XlsxWriter
 yarl
 zope.interface
 PyMuPDF
+mysql
+mysqlclient
+PyMySQL
