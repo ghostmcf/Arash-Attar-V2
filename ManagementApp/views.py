@@ -1,5 +1,5 @@
 from ClassroomsPlatform.models import Classroom,ClassroomPresence
-from AssignmentPlatform.models import Assignment,AssignmentScore,AssignmentAverage
+from AssignmentPlatform.models import Assignment,AssignmentScore
 from Frontend import scripts
 from Frontend.upload_manager import auto_upload,process_content_urls
 from ExamsPlatform.models import Question,Exam,ExamScore
