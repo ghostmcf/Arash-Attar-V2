@@ -4,7 +4,6 @@ import uuid
 from datetime import datetime,timedelta
 from django.utils import timezone
 from datetime import datetime
-from Frontend.function import path_and_rename
 # Create your models here.
 from decimal import Decimal
 
@@ -14,15 +13,14 @@ class Assignment (models.Model) :
     AssignmentName              = models.CharField("نام تکلیف",max_length=100 , blank=True ,null=True)
     assignment_headline         = models.CharField("موضوع تکلیف",max_length=100 , blank=True ,null=True)   
     assignment_description      = models.TextField("توضیحات تکلیف",max_length=500,blank=True,null=True)    
-    assignment_creation_time          = models.DateTimeField("زمان ساخت تکلیف",auto_now_add=True)
-    assignment_available_time_start   = models.DateTimeField("زمان شروع تکلیف",default= datetime.now())
-    assignment_available_time_end     = models.DateTimeField("زمان پایان تکلیف",default= datetime.now() + timedelta(days=1))
-    assignment_permission             = models.BooleanField("وضعیت  دسترسی تکلیف",default=True)
-    assignment_finished               = models.BooleanField("وضعیت  اتمام تکلیف",default=False)
-    assignment_extra_score            = models.IntegerField("نمره اضافه",default=0)
-    assignment_file                     = models.FileField("فایل تکلیف",upload_to=path_and_rename("assignment_file"),max_length=500, blank=True ,null=True)
-    assignment_answer_file              = models.FileField("فایل پاسخ تکلیف",upload_to=path_and_rename("assignment_answer_file"),max_length=500, blank=True ,null=True)
-
+    assignment_creation_time            = models.DateTimeField("زمان ساخت تکلیف",auto_now_add=True)
+    assignment_available_time_start     = models.DateTimeField("زمان شروع تکلیف",default= datetime.now())
+    assignment_available_time_end       = models.DateTimeField("زمان پایان تکلیف",default= datetime.now() + timedelta(days=1))
+    assignment_permission               = models.BooleanField("وضعیت  دسترسی تکلیف",default=True)
+    assignment_finished                 = models.BooleanField("وضعیت  اتمام تکلیف",default=False)
+    assignment_extra_score              = models.IntegerField("نمره اضافه",default=0)
+    assignment_file                     = models.CharField("فایل تکلیف",max_length=500, blank=True ,null=True)
+    assignment_answer_file              = models.CharField("فایل پاسخ تکلیف",max_length=500, blank=True ,null=True)
 
     
     def finish_assignment(self):
@@ -81,7 +79,10 @@ class Assignment (models.Model) :
             
             # Update averages in bulk
             AssignmentAverage.objects.bulk_update(averages_to_update.keys(), ['average', 'assignment_count', 'assignment_abscent_count'])
-
+            return True
+        elif self.assignment_finished:
+            return True
+        return False    
    
     
     
@@ -141,28 +142,20 @@ class AssignmentAverage (models.Model) :
     def __str__(self) :
         return "  %s %s    ,میانگین: %s" % (self.user.first_name,self.user.last_name,self.get_average()) 
 
-
+ 
 class AssignmentScore (models.Model) :
     assignment                = models.ForeignKey(Assignment ,verbose_name="تکلیف",on_delete=models.CASCADE)
     assignment_average_reffer = models.ForeignKey(AssignmentAverage,verbose_name="دانش آموز",on_delete=models.CASCADE)
-    assignment_student_file   = models.FileField("تکلیف دانش آموز",upload_to=path_and_rename('assignment/students/'),max_length=500, blank=True ,null=True)
-    assignment_teacher_file   = models.FileField("تصحیح دانش آموز",upload_to=path_and_rename('assignment/students/answers/'),max_length=500, blank=True ,null=True)
+    assignment_student_file   = models.CharField("تکلیف دانش آموز",max_length=500, blank=True ,null=True)
+    assignment_teacher_file   = models.CharField("تصحیح دانش آموز",max_length=500, blank=True ,null=True)
     score                     = models.DecimalField("درصد تکلیف",default=0,max_digits=5, decimal_places=2)
     assignment_permission     = models.BooleanField("مجوز دستی تکلیف",default=False)
     assignment_presence       = models.BooleanField("ارسال تکلیف",default=False)
     assignment_finished       = models.BooleanField("پایان تکلیف",default=False)
     assignment_marked         = models.BooleanField("وضعیت تصحیح تکلیف",default=False)
-    assignment_marked_by      = models.CharField("مصحح",max_length=100 , blank=True ,null=True)
-    score_nums                = (
-        ( 0 , 0),
-        ( 1 , 1),
-        ( 2 , 2),
-        ( 3 , 3),
-        ( 4 , 4),
-        ( 5 , 5),
-    )
-    updated_file_at = models.DateTimeField(auto_now_add=True)
-    extra_score     = models.DecimalField("درصد اضافه",max_digits=5, decimal_places=2, default=0.00)            
+    assignment_marked_by      = models.CharField("مصحح",max_length=30 , blank=True ,null=True)
+    updated_file_at           = models.DateTimeField(auto_now_add=True)
+    extra_score               = models.DecimalField("درصد اضافه",max_digits=5, decimal_places=2, default=0.00)            
     q1_score = models.DecimalField("نمره سوال 1", max_digits=4, decimal_places=2, blank=True, null=True, default=None)
     q2_score = models.DecimalField("نمره سوال 2", max_digits=4, decimal_places=2, blank=True, null=True, default=None)
     q3_score = models.DecimalField("نمره سوال 3", max_digits=4, decimal_places=2, blank=True, null=True, default=None)
@@ -201,21 +194,14 @@ class AssignmentScore (models.Model) :
             self.save(update_fields=['score'])
             self.assignment_average_reffer.get_average()
         elif self.assignment_marked:
-            # self.score = sum([
-            #     self.q1_score, self.q2_score, self.q3_score, self.q4_score, self.q5_score,
-            #     self.q6_score, self.q7_score, self.q8_score, self.q9_score, self.q10_score,
-            #     self.q11_score, self.q12_score, self.q13_score, self.q14_score, self.q15_score,
-            #     self.q16_score, self.q17_score, self.q18_score, self.q19_score, self.q20_score,
-            #     self.extra_score, self.assignment.assignment_extra_score
-            # ])
             scores = [
                 Decimal(self.q1_score or 0.00), Decimal(self.q2_score or 0.00), Decimal(self.q3_score or 0.00),
                 Decimal(self.q4_score or 0.00), Decimal(self.q5_score or 0.00), Decimal(self.q6_score or 0.00),
                 Decimal(self.q7_score or 0.00), Decimal(self.q8_score or 0.00), Decimal(self.q9_score or 0.00),
-                Decimal(self.q10_score or 0.00), Decimal(self.q11_score), Decimal(self.q12_score),
-                Decimal(self.q13_score), Decimal(self.q14_score), Decimal(self.q15_score),
-                Decimal(self.q16_score), Decimal(self.q17_score), Decimal(self.q18_score),
-                Decimal(self.q19_score), Decimal(self.q20_score), Decimal(self.extra_score),
+                Decimal(self.q10_score or 0.00), Decimal(self.q11_score or 0.00), Decimal(self.q12_score or 0.00),
+                Decimal(self.q13_score or 0.00), Decimal(self.q14_score or 0.00), Decimal(self.q15_score or 0.00),
+                Decimal(self.q16_score or 0.00), Decimal(self.q17_score or 0.00), Decimal(self.q18_score or 0.00),
+                Decimal(self.q19_score or 0.00), Decimal(self.q20_score or 0.00), Decimal(self.extra_score or 0.00),
                 Decimal(self.assignment.assignment_extra_score)
             ]
 

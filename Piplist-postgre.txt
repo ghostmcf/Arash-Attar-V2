@@ -86,3 +86,4 @@ yarl
 zope.interface
 PyMuPDF
 psycopg2-binary
+smsir-python

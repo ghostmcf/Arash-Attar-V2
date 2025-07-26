@@ -10,6 +10,7 @@ from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 
 from rest_framework.views import APIView
+from .models import UploadQueue
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -70,3 +71,26 @@ def UserInfoBox(request):
         return Response({'group_day':selected_group.group_day,'group_time':selected_group.group_time,'group_grade':selected_group.group_grade,'group_type':request.user.studentuser.student_type,},status=status.HTTP_200_OK)
 
 
+
+# views.py
+
+
+# class UploadStatusView(APIView):
+#     def get(self, request, remote_filename):
+#         try:
+#             upload = UploadQueue.objects.filter(remote_filename=remote_filename).last()
+#             if not upload:
+#                 return Response({"status": "not_found"}, status=404)
+#             return Response({
+#                 "status": upload.status,
+#                 "log": upload.log_message,
+#                 "retries": upload.retries,
+#                 "is_replacement": upload.is_replacement
+#             })
+#         except Exception as e:
+#             return Response({"error": str(e)}, status=500)
+
+# class ManualRetryView(APIView):
+#     def get(self, request):
+#         wake_scheduler()
+#         return Response({"message": "Retry process started (if pending/failed files exist)"})

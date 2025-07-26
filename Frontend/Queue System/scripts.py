@@ -1,9 +1,11 @@
 import os
 from django.conf import settings
-from .models import AssignmentScore,Assignment  # فرض میکنیم مدل در فایل assignment/models.py قرار دارد
+from AssignmentPlatform.models import AssignmentScore,Assignment  # فرض میکنیم مدل در فایل assignment/models.py قرار دارد
 from django.db import transaction
 from django.db.models import Q
+from Frontend.upload_manager import connect_ftps,upload_logger,error_perm
 
+VALID_EXTENSIONS = ('.pdf', '.jpg', '.jpeg', '.png')
 
 def identify_orphaned_files():
     # دریافت مسیر تمامی فایل‌های موجود در مدل AssignmentScore
@@ -106,3 +108,17 @@ def reset_assignment_files_to_default():
             assignment_student_file=default_path,
             assignment_teacher_file=default_path
         )
+
+def temporaryscript():
+    pass        
+
+# @api_view(['GET'])
+# @permission_classes([IsAdminUser])
+# def invalidate_authenticated_users(request):
+#     """حذف نشست‌های کاربران لاگین‌شده و حفظ نشست کاربران مهمان"""
+#     logged_in_users = User.objects.filter(is_active=True)
+#     sessions = Session.objects.filter(session_key__in=[
+#         s.session_key for s in Session.objects.all() if "_auth_user_id" in s.get_decoded()
+#     ])
+#     sessions.delete()
+#     return Response({"message": "نشست‌های کاربران احراز هویت‌شده حذف شد."}, status=status.HTTP_400_BAD_REQUEST)

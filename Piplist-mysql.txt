@@ -88,3 +88,4 @@ PyMuPDF
 mysql
 mysqlclient
 PyMySQL
+smsir-python

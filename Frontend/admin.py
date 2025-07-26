@@ -1,3 +1,3 @@
+# admin.py
+import os
 from django.contrib import admin
-
-# Register your models here.

@@ -43,6 +43,7 @@ class AssignmentScoreUserSerializer (serializers.ModelSerializer):
     class Meta:
         model = AssignmentScore
         fields = ('id','score','assignment','assignment_presence','assignment_marked','assignment_student_file','assignment_teacher_file')
+        read_only_fields = ['assignment_student_file', 'assignment_teacher_file']
         
 class AssignmentAverageUserSerializer (serializers.ModelSerializer):
     assignmentscore_set =AssignmentScoreUserSerializer(many=True, read_only=True)
@@ -65,8 +66,12 @@ class ExamAverageUserSerializer (serializers.ModelSerializer):
     examscore_set =ExamScoreUserSerializer(many=True, read_only=True)
     class Meta:
         model = ExamAverage
-        fields = ('average','exam_abscent_count','examscore_set')
-
+        fields = ('average','final_average','exam_count','exam_abscent_count','examscore_set')
+ 
+class ExamAverageNCSerializer (serializers.ModelSerializer):
+    class Meta:
+        model = ExamAverage
+        fields = ['non_countable_count']
 #############################################
 class GroupsSerializer (serializers.ModelSerializer):
     class Meta:
@@ -77,7 +82,7 @@ class GroupsSerializer (serializers.ModelSerializer):
 class SmallStudentInfoSerializer (serializers.ModelSerializer):
     class Meta:
         model = StudentUser 
-        fields = ('father_name','avatar','student_school')
+        fields = ('father_name','student_school')
 
 class StudentInfoSerializer (serializers.ModelSerializer):
     class Meta:
@@ -120,7 +125,7 @@ class GroupSerializer (serializers.ModelSerializer):
 class CreateStudentUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = StudentUser
-        fields = ['id', 'student_user', 'father_name', 'phone_number', 'father_number', 'mother_number', 'home_number', 'address', 'registration_date', 'avatar', 'student_school', 'average_exam', 'average_assignment', 'student_type', 'student_gender', 'student_grade']
+        fields = ['id', 'student_user', 'father_name', 'phone_number', 'father_number', 'mother_number', 'home_number', 'address', 'registration_date', 'student_school', 'average_exam', 'average_assignment', 'student_type', 'student_gender', 'student_grade']
         
 class UpdateStudentUserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -134,7 +139,7 @@ class ClassroomSerializer (serializers.ModelSerializer):
     classroom_available_time_end    = serializers.DateTimeField(format="%Y-%m-%d", input_formats=['%Y-%m-%d',])
     class Meta:
         model = Classroom
-        fields = "__all__"   
+        fields = "__all__"
         
 
 class ClassroomsSerializer (serializers.ModelSerializer):
@@ -150,7 +155,9 @@ class AssignmentSerializer (serializers.ModelSerializer):
     # assignment_creation_time          = serializers.DateTimeField(format="%Y-%m-%d %H:%M", input_formats=['%Y-%m-%d %H:%M',])
     class Meta:
         model = Assignment
-        fields = "__all__"    
+        fields = "__all__"
+        read_only_fields = ['assignment_file', 'assignment_answer_file']
+            
 class AssignmentSerializerWithGroup (serializers.ModelSerializer):
     assignment_group       = GroupsSerializer()
     assignment_available_time_start   = serializers.DateTimeField(format="%Y-%m-%d %H:%M", input_formats=['%Y-%m-%d %H:%M',])
@@ -159,6 +166,7 @@ class AssignmentSerializerWithGroup (serializers.ModelSerializer):
     class Meta:
         model = Assignment
         fields = "__all__"  
+        read_only_fields = ['assignment_file', 'assignment_answer_file']
 
         
 class AssignmentAverageSerializer (serializers.ModelSerializer):
@@ -195,6 +203,7 @@ class AssignmentScoreSerializer (serializers.ModelSerializer):
     class Meta:
         model = AssignmentScore
         fields = "__all__"  
+        read_only_fields = ['assignment_student_file', 'assignment_teacher_file']
         
 class AssignmentScoresSerializer (serializers.ModelSerializer):
     assignment_average_reffer   = AssignmentAverageForPrimaryInfosScoreSerializer()
@@ -203,12 +212,14 @@ class AssignmentScoresSerializer (serializers.ModelSerializer):
     class Meta:
         model = AssignmentScore
         fields = ('id','score','assignment_average_reffer','updated_file_at','assignment','assignment_teacher_file','assignment_student_file','assignment_presence','assignment_finished','assignment_marked','assignment_marked_by')    
+        read_only_fields = ['assignment_student_file', 'assignment_teacher_file']
 ###########################################################
 class QuestionSerializer (serializers.ModelSerializer):
     # question_creation_time  = serializers.DateTimeField(format="%Y-%m-%d %H:%M", input_formats=['%Y-%m-%d %H:%M',])
     class Meta:
         model = Question
         fields = "__all__"  
+        read_only_fields = ['question_img', 'question_answer_img']
         
     # questions= QuestionSerializer(many=True, read_only=True)
 
@@ -221,6 +232,7 @@ class ExamSerializer (serializers.ModelSerializer):
     class Meta:
         model = Exam
         fields = "__all__"  
+        read_only_fields = ['exam_answer_file', 'exam_description']
         
 class ExamSerializerWithGroup (serializers.ModelSerializer):
     exam_group=GroupsSerializer()
@@ -230,7 +242,10 @@ class ExamSerializerWithGroup (serializers.ModelSerializer):
     exam_maxenterance_time      = serializers.DateTimeField(format="%Y-%m-%d %H:%M", input_formats=['%Y-%m-%d %H:%M',])
     class Meta:
         model = Exam
-        fields = "__all__"          
+        fields = "__all__"  
+        read_only_fields = ['exam_answer_file', 'exam_description']   
+             
+        
         
 class ExamSerializerWithQuestion (serializers.ModelSerializer):
     questions= QuestionSerializer(many=True, read_only=True)
@@ -241,6 +256,7 @@ class ExamSerializerWithQuestion (serializers.ModelSerializer):
     class Meta:
         model = Exam
         fields = "__all__"
+        read_only_fields = ['exam_answer_file', 'exam_description']
 
 class ExamNameSerializer (serializers.ModelSerializer):
     class Meta:
@@ -255,6 +271,7 @@ class ExamScoresSerializerWithExamName (serializers.ModelSerializer):
     class Meta:
         model = ExamScore
         fields = "__all__" 
+        
 
 class ExamScoresSerializer (serializers.ModelSerializer):
     # updated_at                          = serializers.DateTimeField(format="%Y-%m-%d %H:%M", input_formats=['%Y-%m-%d %H:%M',])

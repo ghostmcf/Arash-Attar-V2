@@ -18,12 +18,14 @@ router.register(r'users',views.UsersIndex)
 router.register('directmoney',views.DirectMoneyIndex)
 router.register('signedcheck',views.SignedCheckIndex)
 router.register('books',views.BooksIndex)
-
+router.register("notifications", views.NotificationViewSet, basename="notification")
+router.register(r'smsmanager', views.SMSManagerIndex, basename='smsmanager')
 
 app_name='ManagementApp'
 urlpatterns = [
     path('upload-excel/', views.UploadExcelView.as_view(), name='upload-excel'),
     path('change-password/', views.change_user_password, name='change-password'),
+    path('zappier/', views.zappier, name='zappier'),
     # path('kick-all/', views.invalidate_authenticated_users, name='kick-logged-users'),
     
 ]

@@ -8,20 +8,41 @@ from os import path
 import os
 from fpdf import FPDF
 from PIL import Image
-from Frontend.function import path_and_rename
 from django.core.files import File
 from django.conf import settings
-# from django.db.models import Sum, Count, Case, When
+from Frontend.upload_manager import TEMP_DIR , auto_upload
 # Create your models here.
+import requests
+from django.core.files.uploadedfile import SimpleUploadedFile
 
+
+
+def download_file(url, local_path):
+    """دانلود فایل از URL و ذخیره در مسیر local_path"""
+    r = requests.get(url, stream=True)
+    r.raise_for_status()
+    with open(local_path, 'wb') as f:
+        for chunk in r.iter_content(chunk_size=8192):
+            f.write(chunk)
+    return local_path
+
+def compress_image(input_path, output_path, max_width=1200, quality=85):
+    """کم کردن حجم تصویر با حفظ کیفیت نسبی"""
+    img = Image.open(input_path).convert('RGB')
+    if img.width > max_width:
+        ratio = max_width / float(img.width)
+        height = int((float(img.height) * float(ratio)))
+        img = img.resize((max_width, height), Image.LANCZOS)
+    img.save(output_path, 'JPEG', quality=quality)
+    return output_path
 
 class Question (models.Model) :
     question_id             = models.UUIDField("شماره شناسایی آزمون",primary_key=True,default=uuid1,help_text="شماره شناسایی سوال به طور خودکار ساخته میشود و باید بی همتا باشد،لطفا تغییر ندهید")
     question_headline       = models.CharField("تیتر سوال",max_length=50,help_text="قسمتی از سوال از جهت شناسایی آن توسط کاربر، توجه داشته باشید که تیتر سوال در امتحان نمایش داده نمیشود و صرفا حهت سهولت در پنل مدیریت است")
     question_category       = models.CharField("موضوع سوال",max_length=50,help_text="قسمتی از سوال از جهت شناسایی آن توسط کاربر، توجه داشته باشید که تیتر سوال در امتحان نمایش داده نمیشود و صرفا حهت سهولت در پنل مدیریت است")
     question_creation_time  = models.DateTimeField("زمان ساخت سوال",auto_now_add=True)
-    question_answer_img     = models.ImageField("تصویر جواب سوال",upload_to=path_and_rename("aqimg"),max_length=500, blank=True ,null=True,help_text="در صورت نیاز")
-    question_img            = models.ImageField("تصویر سوال",upload_to=path_and_rename("qimg"),max_length=500, blank=True ,null=True,help_text="در صورت نیاز")
+    question_answer_img     = models.CharField("تصویر جواب سوال",max_length=500, blank=True ,null=True,help_text="در صورت نیاز")
+    question_img            = models.CharField("تصویر سوال",max_length=500, blank=True ,null=True,help_text="در صورت نیاز")
     question_answer         = models.IntegerField("پاسخ سوال",default=False)
     question_time           = models.IntegerField("زمان مجاز سوال",default=120,help_text="واحد ثانیه")
     question_book           = models.CharField("کتاب سوال",max_length=50, blank=True ,null=True)
@@ -29,8 +50,6 @@ class Question (models.Model) :
 
 
     def resize_img(self):
-            # saving image first
-            # if path.exists(self.question_img.path):
             try:
                 super().save()
                 path.exists(self.question_img.path)
@@ -42,17 +61,13 @@ class Question (models.Model) :
                 if img.height != 200 or img.width != 400:
                     new_img = (400, 200)
                     img=img.resize(new_img)
-                    # print(self.avatar.path)
-                    # remove(self.avatar.path)
                     if img.mode != 'RGB':
                         img = img.convert('RGB')
                     img.save(self.question_img.path, "JPEG", quality=90)        
         
     def __str__(self) -> str:
-        self.resize_img()
+        # self.resize_img()
         return "%s   ,Question Answer: %s  ,Question Creation Date: %s " % (self.question_headline ,self.question_answer ,datetime.now().strftime("%c") ) 
-
-
 
 class Exam (models.Model) :
     exam_group                  = models.ForeignKey(Group,verbose_name="گروه",on_delete=models.CASCADE,blank=True ,null=True)
@@ -60,8 +75,8 @@ class Exam (models.Model) :
     ExamName                    = models.CharField("نام آزمون",max_length=100 , blank=True ,null=True)
     exam_headline               = models.CharField("موضوع آزمون",max_length=100 , blank=True ,null=True)
     exam_id                     = models.UUIDField("شماره شناسایی آزمون",primary_key=True,default=uuid1,help_text="شماره شناسایی آزمون به طور خودکار ساخته میشود و باید بی همتا باشد،لطفا تغییر ندهید")    
-    exam_description            = models.FileField("فایل آزمون",upload_to=path_and_rename("eimg"),max_length=500, blank=True ,null=True)
-    exam_answer_file            = models.FileField("فایل پاسخنامه آزمون",upload_to=path_and_rename("aimg"),default="useravatar/default-user.jpg",max_length=500, blank=True ,null=True)
+    exam_description            = models.CharField("فایل آزمون",max_length=500, blank=True ,null=True)
+    exam_answer_file            = models.CharField("فایل پاسخنامه آزمون",max_length=500, blank=True ,null=True)
     exam_creation_time          = models.DateTimeField("زمان ساخت آزمون",default= datetime.now())
     exam_available_time_start   = models.DateTimeField("زمان شروع آزمون",default= datetime.now())
     exam_available_time_end     = models.DateTimeField("زمان پایان آزمون",default= datetime.now() + timedelta(minutes=20))
@@ -73,39 +88,89 @@ class Exam (models.Model) :
     exam_finished               = models.BooleanField("وضعیت  اتمام آزمون",default=False)
     student_returns             = models.IntegerField("تعداد بازگشت",default=2)
     exam_extra_score            = models.IntegerField("نمره اضافه",default=0)
+    exam_note                   = models.CharField("توضیح آزمون",max_length=100 , blank=True ,null=True)
     
-
-  
     def merge_question_answer_images(self):
-        newDir = os.path.join(self.exam_group.name, self.exam_headline)
-        new_pdf_subdir = os.path.join(settings.MEDIA_ROOT, newDir)
-        if not os.path.exists(new_pdf_subdir):
-            os.makedirs(new_pdf_subdir)
+        exam_temp_dir = os.path.join(TEMP_DIR, f"exam_{self.exam_id}".replace("-", ""))
+        os.makedirs(exam_temp_dir, exist_ok=True)
+        print(f"[INFO] Temporary directory created: {exam_temp_dir}")
 
-        pdf = FPDF()
-        questions = self.questions.all()
-        for question in questions:
-            pdf.add_page()
-            question_img = Image.open(question.question_img.path).convert('RGB')
-            question_answer_img = Image.open(question.question_answer_img.path).convert('RGB')
+        pdf = FPDF(unit='mm', format='A4')
+        cleanup_files = []
+        final_pdf_path = None
 
-            question_img_path = os.path.join(new_pdf_subdir, f'{question.question_id}_img.jpg')
-            question_answer_img_path = os.path.join(new_pdf_subdir, f'{question.question_id}_answer_img.jpg')
+        try:
+            for question in self.questions.all():
+                pdf.add_page()
+                pdf.set_font("Arial", size=12)
+                pdf.cell(0, 10, f"Title: {question.question_id}", ln=True)
+                # pdf.cell(0, 10, f"Title: {question.question_headline}", ln=True)
+                # pdf.cell(0, 12, f"Book: {question.question_book}", ln=True)
+                # pdf.cell(0, 14, f"Grade: {question.question_grade}", ln=True)
 
-            question_img.save(question_img_path)
-            question_answer_img.save(question_answer_img_path)
+                # Generate safe filenames
+                q_img_local = os.path.join(exam_temp_dir, f"{question.question_id}_q.jpg")
+                a_img_local = os.path.join(exam_temp_dir, f"{question.question_id}_a.jpg")
 
-            pdf.image(question_img_path, x=10, y=8, w=100)
-            pdf.image(question_answer_img_path, x=10, y=148, w=100)
+                # Download and compress
+                if question.question_img:
+                    try:
+                        download_file(question.question_img, q_img_local)
+                        compress_image(q_img_local, q_img_local)
+                        cleanup_files.append(q_img_local)
+                    except Exception as e:
+                        print(f"[ERROR] Failed to process question image: {e}")
 
-        new_pdf_path = os.path.join(new_pdf_subdir, self.ExamName + ".pdf")
-        pdf.output(new_pdf_path, 'F')
+                if question.question_answer_img:
+                    try:
+                        download_file(question.question_answer_img, a_img_local)
+                        compress_image(a_img_local, a_img_local)
+                        cleanup_files.append(a_img_local)
+                    except Exception as e:
+                        print(f"[ERROR] Failed to process answer image: {e}")
 
-        with open(new_pdf_path, 'rb') as f:
-            self.exam_answer_file.save(self.ExamName + '.pdf', File(f))
-        self.save()
+                # Add images if exist
+                try:
+                    if os.path.exists(q_img_local):
+                        pdf.image(q_img_local, x=10, y=20, w=90, type='JPEG')
+                    if os.path.exists(a_img_local):
+                        pdf.image(a_img_local, x=10, y=150, w=90, type='JPEG')
+                except Exception as e:
+                    print(f"[ERROR] Failed to insert image into PDF: {e}")
 
-            
+            # Save PDF with exam_id
+            final_pdf_path = os.path.join(exam_temp_dir, f"{self.exam_id}.pdf")
+            print(f"[INFO] Saving PDF: {final_pdf_path}")
+            pdf.output(final_pdf_path, 'F')
+
+            # Check file size before upload
+            if not os.path.exists(final_pdf_path) or os.path.getsize(final_pdf_path) == 0:
+                print("[ERROR] PDF file is empty or missing!")
+                return False
+
+            # Upload
+            with open(final_pdf_path, 'rb') as f:
+                file_data = f.read()
+                uploaded_file = SimpleUploadedFile(f"{self.exam_id}.pdf", file_data, content_type="application/pdf")
+                self.exam_answer_file = auto_upload("exam_answer", self, file_obj=uploaded_file)
+                self.save(update_fields=['exam_answer_file',])
+                print("[INFO] PDF uploaded successfully")
+                
+
+        finally:
+            # Cleanup
+            for file_path in cleanup_files:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            if final_pdf_path and os.path.exists(final_pdf_path):
+                os.remove(final_pdf_path)
+            if os.path.exists(exam_temp_dir):
+                os.rmdir(exam_temp_dir)
+            print("[INFO] Cleanup complete")
+
+
+    
+    
     def set_exam_time(self):
         a=self.questions.all()
         b=0
@@ -118,7 +183,6 @@ class Exam (models.Model) :
         self.save()
         return self.exam_duration
         
-        
     def is_running(self):
         if self.exam_available_time_end >= timezone.now() >= self.exam_available_time_start and self.exam_permission:    
             if not self.exam_running:
@@ -130,9 +194,7 @@ class Exam (models.Model) :
                 self.exam_running=False
                 self.save()
             return False
-            
-    
-    
+              
     def finish_exam(self):
         if self.exam_available_time_end < timezone.now() and not self.exam_finished:
             self.exam_finished = True
@@ -144,8 +206,6 @@ class Exam (models.Model) :
             # for score in self.examscore_set.filter(exam_average_reffer__user__in=student_ids):
                 score.get_score()
             print("Exam Ended")
-
-
 
     def create_exam_score(self):
         for student in self.exam_group.user_set.all() :                
@@ -171,38 +231,65 @@ class Exam (models.Model) :
                     pass
 
     def __str__(self) -> str:
+        # self.merge_question_answer_images()
         # self.create_exam_score()
         # self.update_exam_score()
         self.set_exam_time()
         # self.finish_exam()
         return "%s     Start:%s" % (self.ExamName, self.exam_available_time_start.strftime("%c"))
             
-
 # should be created on user registration
 class ExamAverage (models.Model) :
     user                = models.OneToOneField(User ,verbose_name="دانش آموز",on_delete=models.CASCADE,)
-    average             = models.DecimalField("میانگین امتحانات",default=0,max_digits=5, decimal_places=2)
+    average             = models.DecimalField("میانگین امتحانات",default=0,max_digits=5, decimal_places=2)    
     exam_count          = models.IntegerField("تعداد امتحانات",default=0)
     exam_abscent_count  = models.IntegerField("تعداد غیبت",default=0)
+    non_countable_count = models.IntegerField("تعداد آزمون های حذفی",default=3)
+    final_average       = models.DecimalField("میانگین امتحانات با حذف کمترین درصدها",default=0,max_digits=5, decimal_places=2)
+    
+   
     def get_average(self):
-        scoreset = self.examscore_set.filter(exam_finished=True)
-        self.exam_count=scoreset.count()
-        exam_sum=0  
-        abscent_sum=0             
-        if self.exam_count :
-            for exams in scoreset :
-                if exams.exam_peresence :
-                    exam_sum += exams.score                    
-                else:
-                    abscent_sum +=1
-            self.exam_abscent_count=abscent_sum
-            self.average = round(exam_sum/self.exam_count,2)
-            self.save()
+        # ۱. جمع‌آوری داده‌ها با دو کوئری ساده
+        online  = list(self.examscore_set.filter(exam_finished=True,countable=True).values_list('score', 'exam_peresence'))
+        offline = list(self.examscoreoffline_set.filter(countable=True).values_list('score', 'exam_peresence'))
+
+        records = online + offline
+        total = len(records)
+
+        # اگر هیچ امتحانی وجود ندارد
+        if total == 0:
+            self.exam_count = 0
+            self.exam_abscent_count = 0
+            self.average = 0
+            self.final_average = 0
+            self.save(update_fields=['exam_count', 'exam_abscent_count', 'average', 'final_average'])
+            return 0
+
+        # ۲. تفکیک نمرات حاضرها
+        present_scores = [score for score, present in records if present]
+        present_count = len(present_scores)
+        abscent_count = total - present_count
+
+        # ۳. محاسبه میانگین ساده (با فرض صفر برای غایب‌ها)
+        total_score = sum(present_scores)
+        avg = round(total_score / total, 2)
+
+        # ۴. میانگین با حذف کمترین‌ها (اگر شرایط برقرار باشد)
+        if total > 10 and present_count > self.non_countable_count:
+            trimmed_scores = sorted(present_scores)[self.non_countable_count:]
+            final_avg = round(sum(trimmed_scores) / len(trimmed_scores), 2)
         else:
-            self.average=0        
-        return self.average
+            final_avg = avg
 
+        # ۵. ذخیره با یک save
+        self.exam_count = total
+        self.exam_abscent_count = abscent_count
+        self.average = avg
+        self.final_average = final_avg
+        self.save(update_fields=['exam_count', 'exam_abscent_count', 'average', 'final_average'])
 
+        return avg
+    
     def __str__(self) :
         return "  %s %s    ,میانگین: %s" % (self.user.first_name,self.user.last_name,self.get_average()) 
 
@@ -226,7 +313,8 @@ class ExamScore (models.Model) :
     wrong_counts            = models.IntegerField(default=0)
     none_counts             = models.IntegerField(default=0)
     updated_at              = models.DateTimeField(auto_now=True,auto_now_add=False)
-     
+    countable               = models.BooleanField("محاسبه در میانگین",default=True)
+
     def get_score(self):
         true_counts         =  0
         false_counts        =  0
@@ -257,37 +345,20 @@ class ExamScore (models.Model) :
             self.score=0
         self.save()
         self.exam_average_reffer.get_average()        
-    # def get_score(self):
-    #     true_counts = 0
-    #     false_counts = 0
-    #     n_counts = 0
-    #     self.exam_finished = True
-    #     self.exam_permission = False
-    #     if self.exam_peresence:
-    #         questions = Question.objects.in_bulk(self.questions_list)
-    #         for question_id, user_choice in zip(self.questions_list, self.user_choice):
-    #             if user_choice:
-    #                 question = questions[UUID(question_id)]
-    #                 selected_question_answer = str(question.question_answer)
-    #                 if user_choice == selected_question_answer:
-    #                     true_counts += 1
-    #                 else:
-    #                     false_counts += 1
-    #             elif user_choice == "0":
-    #                 n_counts += 1
     
-    #         self.score = round((( (true_counts*3) - false_counts ) / (len(self.questions_list)*3)) *100,2)
-    #         self.score = self.score + self.exam.exam_extra_score + self.student_extra_score
-    #         if self.score >= 100 :
-    #             self.score = 100
-    #         self.wrong_counts=false_counts
-    #         self.none_counts =n_counts
-    #     elif not self.exam_peresence:
-    #         self.score=0
-    #     self.save()
-    #     self.exam_average_reffer.get_average()   
     
     def __str__(self) :
         # self.get_score()
         return "  %s %s         , نمره:  %s ,       امتحان:  %s,   حضور در امتحان:  %s ,  مجوز برتر:  %s" % (self.exam_average_reffer.user.first_name,self.exam_average_reffer.user.last_name,self.score,self.exam.ExamName,self.exam_peresence,self.exam_permission) 
-   
+
+class ExamScoreOffline (models.Model) :
+    exam                    = models.ForeignKey(Exam ,verbose_name="آزمون",on_delete=models.CASCADE)
+    exam_average_reffer     = models.ForeignKey(ExamAverage,verbose_name="دانش آموز",on_delete=models.CASCADE)
+    score                   = models.DecimalField("درصد آزمون",default=0,max_digits=5, decimal_places=2)
+    exam_peresence          = models.BooleanField("حضور در آزمون",default=True)
+    updated_at              = models.DateTimeField(auto_now=True,auto_now_add=False)
+    countable               = models.BooleanField("محاسبه در میانگین",default=True)   
+    # student_extra_score     = models.IntegerField("نمره اضافه",default=0)
+    # exam_note               = models.CharField("توضیحات",max_length=100 , blank=True ,null=True)
+    # wrong_counts            = models.IntegerField(default=0)
+    # none_counts             = models.IntegerField(default=0)

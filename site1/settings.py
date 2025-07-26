@@ -115,20 +115,20 @@ REST_FRAMEWORK ={
 
 ### Normal DB Configs
 
-# DATABASES = {  
-#     'default': {  
-#         'ENGINE': 'django.db.backends.mysql',  
-#         'NAME': 'mindesca_arash',  
-#         'USER': 'mindesca_attar',  
-#         'PASSWORD': 'hCgr7=^pmFAwk9%X',  
-#         'HOST': '127.0.0.1',  
-#         'PORT': '3306',  
-#         'OPTIONS': {  
-#             'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-#             'charset': 'utf8mb4'
-#         }  
-#     }  
-# } 
+DATABASES = {  
+    'default': {  
+        'ENGINE': 'django.db.backends.mysql',  
+        'NAME': 'arashat1_db',  
+        'USER': 'arashat1_me',  
+        'PASSWORD': 's89tqP~#T%M$M{-]',  
+        'HOST': '127.0.0.1',  
+        'PORT': '3306',  
+        'OPTIONS': {  
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+            'charset': 'utf8mb4'
+        }  
+    }  
+} 
 
 # CACHES = {
 #     "default": {
@@ -140,32 +140,34 @@ REST_FRAMEWORK ={
 #     }
 # }
 
+# SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+# SESSION_CACHE_ALIAS = "default"
 
 ### RUNFLARE DB Configs
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'maindbgqw_db',
-        'USER': 'postgres',
-        'PASSWORD': 'ps!evVUpoRRj6vYN26Zf',
-        'HOST': 'maindb-mfw-service',
-        'PORT': '5432',
-    }
-}
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': 'maindbgqw_db',
+#         'USER': 'postgres',
+#         'PASSWORD': 'ps!evVUpoRRj6vYN26Zf',
+#         'HOST': 'maindb-mfw-service',
+#         'PORT': '5432',
+#     }
+# }
 
-CACHES = {
-    "default": {
-        "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://default:qO33pfoBp$2NfXNhSoBo@cachedb-ign-service:6379/0",
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
-        }
-    }
-}
+# CACHES = {
+#     "default": {
+#         "BACKEND": "django_redis.cache.RedisCache",
+#         "LOCATION": "redis://default:qO33pfoBp$2NfXNhSoBo@cachedb-ign-service:6379/0",
+#         "OPTIONS": {
+#             "CLIENT_CLASS": "django_redis.client.DefaultClient",
+#         }
+#     }
+# }
 
-SESSION_ENGINE = "django.contrib.sessions.backends.cache"
-SESSION_CACHE_ALIAS = "default"
+# SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+# SESSION_CACHE_ALIAS = "default"
 
 # CELERY_BROKER_URL = "redis://default:qO33pfoBp$2NfXNhSoBo@cachedb-ign-service:6379/0"
 
@@ -192,22 +194,26 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 CORS_ORIGIN_WHITELIST = [
-     'http://localhost:3000'
+     'http://localhost:3000',
+    #  'http://127.0.0.1:8000/'
 ]
 CORS_ALLOWED_ORIGINS = [
-    "https://www.kevin.mindescape.co",
-    "https://kevin.mindescape.co",
-    "https://www.lab.mindescape.co",
-    "https://lab.mindescape.co",
     "https://www.arash-attar.com",
     "https://arash-attar.com",
     "https://api.arash-attar.com",
     'http://localhost:3000',
 ]
-    # "http://www.arash-attar.com",
-    # "http://arash-attar.com",
-    # "http://api.arash-attar.com",
 
+
+FTPS_HOST = 'ftp.arash-attar.com'
+FTPS_PORT = 21
+FTPS_USER = 'king@arash-attar.com'
+FTPS_PASSWORD = '7)?YM_)Mz+glslo%'
+FTPS_BASE_URL = 'https://center.arash-attar.com'
+
+# ssh Pass: 1wSJ%G3R.e[,r9K~
+
+           
 JALALI_DATE_DEFAULTS = {
    'Strftime': {
         'date': '%y/%m/%d',
@@ -265,92 +271,84 @@ USE_I18N = True
 
 USE_TZ = True
 
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE =True
-SESSION_EXPIRE_AT_BROWSER_CLOSE = True
-SECURE_SSL_REDIRECT = True
-##
-SECURE_BROWSER_XSS_FILTER = True
-SECURE_CONTENT_TYPE_NOSNIFF = True
-SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-SECURE_HSTS_PRELOAD = True
-SECURE_HSTS_SECONDS = 15768000
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
-X_FRAME_OPTIONS = 'DENY'
+
+### Security
+# SESSION_COOKIE_SECURE = True
+# CSRF_COOKIE_SECURE =True
+# SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+# SECURE_SSL_REDIRECT = True
+# ##
+# SECURE_BROWSER_XSS_FILTER = True
+# SECURE_CONTENT_TYPE_NOSNIFF = True
+# SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+# SECURE_HSTS_PRELOAD = True
+# SECURE_HSTS_SECONDS = 15768000
+# SESSION_COOKIE_SECURE = True
+# CSRF_COOKIE_SECURE = True
+# X_FRAME_OPTIONS = 'DENY'
 
 ##
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.0/howto/static-files/
 
+
 LOGGING = {
     'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'custom': {
+            'format': '%(asctime)s | %(levelname)s | %(message)s'
+        },
+    },
     'handlers': {
-        'file': {
+        'upload_success': {
             'level': 'INFO',
             'class': 'logging.FileHandler',
-            'filename': 'info.log',
+            'filename': os.path.join(BASE_DIR, 'logs', 'upload_success.log'),
+            'formatter': 'custom',
+            'encoding': 'utf-8',
+        },
+        'upload_error': {
+            'level': 'ERROR',
+            'class': 'logging.FileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'upload_error.log'),
+            'formatter': 'custom',
+            'encoding': 'utf-8',
+        },
+        'cleanup_log': {
+            'level': 'INFO',
+            'class': 'logging.FileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'orphan_cleanup.log'),
+            'formatter': 'custom',
+            'encoding': 'utf-8',
+        },
+        'sms_log': {
+        'level': 'INFO',
+        'class': 'logging.FileHandler',
+        'filename': os.path.join(BASE_DIR, 'logs', 'sms.log'),
+        'formatter': 'custom',
+        'encoding': 'utf-8',
         },
     },
     'loggers': {
-        '': {
-            'handlers': ['file'],
+        'upload_manager': {
+            'handlers': ['upload_success', 'upload_error'],
             'level': 'INFO',
+            'propagate': False,
+        },
+        'orphan_cleanup': {  
+            'handlers': ['cleanup_log'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'sms_manager': {
+        'handlers': ['sms_log'],
+        'level': 'INFO',
+        'propagate': False,
         },
     },
 }
-
-
-
-
-# LOGGING = {
-#     'version': 1,
-#     'disable_existing_loggers': False,
-#     'filters': {
-#         'add_request_info': {
-#             '()': RequestLogFilter,
-#         },
-#     },
-#     'formatters': {
-#         'detailed': {
-#             'format': '{asctime} {levelname} USER: {username} URL: {url} MESSAGE: {message}',
-#             'style': '{',
-#         },
-#         'simple': {
-#             'format': '{asctime} {levelname} {message}',
-#             'style': '{',
-#         },
-#     },
-#     'handlers': {
-#         'console': {
-#             'level': 'ERROR',
-#             'class': 'logging.StreamHandler',
-#             'formatter': 'detailed',
-#             'filters': ['add_request_info'],
-#             'stream': 'ext://sys.stderr',
-#         },
-#         'file': {
-#             'level': 'INFO',
-#             'class': 'logging.FileHandler',
-#             'filename': 'info.log',
-#             'formatter': 'simple',
-#         },
-#     },
-#     'loggers': {
-#         'django': {
-#             'handlers': ['console', 'file'],
-#             'level': 'INFO',
-#             'propagate': True,
-#         },
-#         'django.request': {
-#             'handlers': ['console'],
-#             'level': 'ERROR',
-#             'propagate': False,
-#         },
-#     },
-# }
-
 
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 10 MB, adjust as needed
@@ -361,6 +359,10 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'Storage/staticfiles')
 
 MEDIA_ROOT = os.path.join(BASE_DIR, 'Storage')
 MEDIA_URL = '/Storage/'
+
+TEMP_UPLOAD_DIR = os.path.join(MEDIA_ROOT, 'uploads', 'tmp')
+
+os.makedirs(TEMP_UPLOAD_DIR, exist_ok=True)
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.0/ref/settings/#default-auto-field

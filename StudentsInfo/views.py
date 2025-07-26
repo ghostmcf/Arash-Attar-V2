@@ -1,11 +1,8 @@
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
 from . import models
-# from django.utils import timezone
-
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from django.shortcuts import get_object_or_404
 from . import models ,serializers
 from ManagementApp.serializers import UserSerializer
 from rest_framework import status,viewsets
@@ -14,9 +11,8 @@ from rest_framework.decorators import api_view,permission_classes
 from rest_framework.views import APIView
 from django.contrib.auth import authenticate
 # Create your views here.
+from rest_framework.decorators import action
 
-# from django.http import HttpResponse
-# import datetime
 
 
 @permission_classes([IsAuthenticated])
@@ -71,42 +67,5 @@ class ChangePasswordView(APIView):
             return Response({'status': 'password changed'}, status=status.HTTP_200_OK)
         else:
             return Response({'status': 'wrong credentials'}, status=status.HTTP_400_BAD_REQUEST)        
-            
-         
-class ChangeAvatarView(APIView):
-    http_method_names = ['patch']
-    permission_classes = [IsAuthenticated]
-    def patch(self, request):
-        # student = models.StudentUser.objects.get(pk=request.user.id)
-        student = request.user.studentuser
-        student.avatar = request.data['avatar']
-        student.save()
-        return Response({'status': 'avatar changed'}, status=status.HTTP_200_OK)
-
-    # return render(request,'index.html')
-#user.groups.add(name='groupname')
-# my_group = Group.objects.get(name='my_group_name') 
-# my_group.user_set.add(your_user)
 
 
-##############Bug Fix on Null Directmoney "payment_date"
-# @permission_classes([IsAuthenticated])
-# @api_view(['GET'])
-# def update_direct_money_view(request):
-#     # Find all DirectMoney records with a null payment_date
-#     direct_moneys = models.DirectMoney.objects.filter(payment_date__isnull=True)
-#     # Open a file to write the usernames
-#     with open('direct_money_usernames.txt', 'w') as file:
-#         for direct_money in direct_moneys:
-#             # Get the username of the student
-#             username = direct_money.student.username
-
-#             # Write the username to the file
-#             file.write(f'{username}\n')
-
-#             # Update the payment_date to 2000-01-01
-#             direct_money.payment_date = datetime.date(2000, 1, 1)
-#             direct_money.save()
-
-#     return HttpResponse("Successfully updated payment_date and stored usernames in direct_money_usernames.txt")
-    
