@@ -15,7 +15,7 @@ class ClassroomViewset(viewsets.ViewSet):
     def get_by_headline(self, request):
         try:
             group = request.user.groups.all()[0]
-            class_list = group.classroom_set.filter(classroom_headline=request.POST.get("headline")).order_by('-classroom_permission','-classroom_available_time_end',)
+            class_list = group.classroom_set.filter(classroom_headline=request.POST.get("headline")).order_by('-classroom_status','-classroom_available_time_end',)
         except:
             return Response(status=status.HTTP_404_NOT_FOUND)
         else:

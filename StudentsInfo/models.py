@@ -65,7 +65,7 @@ class StudentUser (models.Model) :
         new_assignment_scores = [A_models.AssignmentScore(assignment=assignment, assignment_average_reffer=assignment_average) for assignment in assignments if assignment.assignment_id not in existing_assignment_scores]
         A_models.AssignmentScore.objects.bulk_create(new_assignment_scores)
     
-        classrooms = C_models.Classroom.objects.filter(classroom_groups__in=self.student_user.groups.all(), classroom_finished=False)
+        classrooms = C_models.Classroom.objects.filter(classroom_groups__in=self.student_user.groups.all(),classroom_status__in=[C_models.ClassroomStatus.ACTIVE, C_models.ClassroomStatus.RUNNING])
         existing_classroom_presences = set(C_models.ClassroomPresence.objects.filter(Q(classroom__in=classrooms) & Q(classroom_average_reffer=classroom_average)).values_list('classroom_id', flat=True))
         new_classroom_presences = [C_models.ClassroomPresence(classroom=classroom, classroom_average_reffer=classroom_average) for classroom in classrooms if classroom.classroom_id not in existing_classroom_presences]
         C_models.ClassroomPresence.objects.bulk_create(new_classroom_presences)

@@ -41,7 +41,7 @@ class ClassroomAdmin (admin.ModelAdmin):
             'fields': ('classroom_available_time_start','classroom_available_time_end'),
         }), 
         ('تنظیمات کلاس' , {
-            'fields': (('classroom_presence','classroom_permission','classroom_finished',),('classroom_creation_completion',)),
+            'fields': (('classroom_presence','classroom_status',),('classroom_creation_completion',)),
         }),       
     )
 

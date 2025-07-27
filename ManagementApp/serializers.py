@@ -147,7 +147,7 @@ class ClassroomsSerializer (serializers.ModelSerializer):
     classroom_available_time_end = serializers.DateTimeField(format="%Y-%m-%d", input_formats=['%Y-%m-%d',])
     class Meta:
         model = Classroom
-        fields = ('ClassroomName','classroom_id','classroom_headline','classroom_available_time_end','classroom_presence','classroom_permission','classroom_running','classroom_finished','classroom_groups')#,'content1_url1','content2_url1','content3_url1','content4_url1','content5_url1')   
+        fields = ('ClassroomName','classroom_id','classroom_headline','classroom_available_time_end','classroom_presence','classroom_status','classroom_groups')#,'content1_url1','content2_url1','content3_url1','content4_url1','content5_url1')   
 ################################################################
 class AssignmentSerializer (serializers.ModelSerializer):
     assignment_available_time_start   = serializers.DateTimeField(format="%Y-%m-%d %H:%M", input_formats=['%Y-%m-%d %H:%M',])
