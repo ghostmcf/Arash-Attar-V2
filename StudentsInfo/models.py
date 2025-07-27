@@ -17,9 +17,6 @@ class StudentUser (models.Model) :
     address             = models.CharField( "آدرس",blank=True,null=True,max_length=200)
     registration_date   = models.DateField("تاریخ ثبت نام",blank=True,null=True)
     student_school      = models.CharField("مدرسه",max_length= 20  ,null=True , blank=True)
-    average_exam        = models.IntegerField( "میانگین درصد آزمون",editable=False,default=0)
-    average_assignment  = models.IntegerField( "میانگین درصد تکالیف",editable=False,default=0)
-    abscent_count       = models.IntegerField( "تعداد غیبت",editable=False,default=0)
     #####
     student_type                   = models.CharField("رشته",max_length=25,null=True,blank=True)
     student_gender                 = models.CharField("جنسیت",max_length=15, choices=(
@@ -31,6 +28,8 @@ class StudentUser (models.Model) :
         ('یازدهم','یازدهم'),
         ('دوازدهم','دوازدهم')
     ) ,null=True,blank=True)
+    student_time                   = models.CharField("ساعت کلاس دانش آموز",max_length=25,null=True,blank=True)
+    student_day                    = models.CharField("روز کلاس دانش آموز",max_length=25,null=True,blank=True)
     ########
     student_status                 = models.CharField("وضعیت تحصیل",max_length=15, choices=(
         ('در حال تحصیل','در حال تحصیل'),
@@ -44,7 +43,9 @@ class StudentUser (models.Model) :
     def student_group_info (self):
         if self.student_user.groups.all().count():
             self.student_gender = self.student_user.groups.all()[0].group_gender
-            self.student_grade   = self.student_user.groups.all()[0].group_grade
+            self.student_grade  = self.student_user.groups.all()[0].group_grade
+            self.student_day    = self.student_user.groups.all()[0].group_day
+            self.student_time   = self.student_user.groups.all()[0].group_time
             self.save()
 
     
@@ -163,9 +164,9 @@ Group.add_to_class('group_day',     models.CharField("روز کلاس",max_lengt
         ('شنبه','شنبه'),
         ('یکشنبه','یکشنبه'),
         ('دوشنبه','دوشنبه'),
-        ('ه شنبه','سه شنبه'),
+        ('سه شنبه','سه شنبه'),
         ('چهارشنبه','چهارشنبه'),
-        ('ج شنبه','پنج شنبه'),
+        ('پنج شنبه','پنج شنبه'),
         ('جمعه','جمعه'),
     ) ,null=True , blank=True))     
 
