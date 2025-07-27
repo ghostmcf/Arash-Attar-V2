@@ -115,20 +115,20 @@ REST_FRAMEWORK ={
 
 ### Normal DB Configs
 
-DATABASES = {  
-    'default': {  
-        'ENGINE': 'django.db.backends.mysql',  
-        'NAME': 'arashat1_db',  
-        'USER': 'arashat1_me',  
-        'PASSWORD': 's89tqP~#T%M$M{-]',  
-        'HOST': '127.0.0.1',  
-        'PORT': '3306',  
-        'OPTIONS': {  
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-            'charset': 'utf8mb4'
-        }  
-    }  
-} 
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'arashat1_db',
+        'USER': 'arashat1_me',
+        'PASSWORD': 's89tqP~#T%M$M{-]',
+        'HOST': '127.0.0.1',
+        'PORT': '3306',
+        'OPTIONS': {
+            'charset': 'utf8mb4',
+            'init_command': "SET NAMES 'utf8mb4' COLLATE 'utf8mb4_unicode_ci', sql_mode='STRICT_TRANS_TABLES'",
+        },
+    }
+}
 
 # CACHES = {
 #     "default": {
