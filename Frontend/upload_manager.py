@@ -21,13 +21,20 @@ TEMP_DIR = settings.TEMP_UPLOAD_DIR
 # اتصال FTPS
 # ---------------------------
 def connect_ftps():
-    ftps = FTP_TLS()
-    ftps.connect(settings.FTPS_HOST, settings.FTPS_PORT, timeout=15)
-    ftps.auth()
-    ftps.login(settings.FTPS_USER, settings.FTPS_PASSWORD)
-    ftps.prot_p()
-    return ftps
-
+    try:
+        ftps = FTP_TLS()
+        ftps.connect(settings.FTPS_HOST, settings.FTPS_PORT, timeout=15)
+        ftps.auth()
+        ftps.login(settings.FTPS_USER, settings.FTPS_PASSWORD)
+        ftps.prot_p()
+        return ftps
+    except error_perm as e:
+        upload_logger.error(f"Permission error during FTPS connection: {e}")
+    except TimeoutError as e:
+        upload_logger.error(f"FTPS Connection timed out: {e}")
+    except Exception as e:
+        upload_logger.error(f"Unexpected FTPS error: {e}", exc_info=True)
+    return None
 # ---------------------------
 # اعتبارسنجی فایل‌ها
 # ---------------------------
@@ -153,6 +160,10 @@ async def upload_to_ftps(file_obj, remote_dir, remote_filename, retries=3, timeo
 # ---------------------------
 def _upload_file_sync(local_path, remote_dir, remote_filename):
     ftps = connect_ftps()
+    if ftps:
+        pass
+    else:
+        upload_logger.warning(f"FTPS connection could not be established for {remote_filename}")
     # ساخت پوشه‌ها
     dirs = remote_dir.strip("/").split("/")
     current_dir = ""
@@ -172,13 +183,29 @@ def _upload_file_sync(local_path, remote_dir, remote_filename):
         pass
 
     # آپلود
-    with open(local_path, "rb") as f:
-        ftps.storbinary(f"STOR {remote_filename}", f)
-
+    # with open(local_path, "rb") as f:
+    #     ftps.storbinary(f"STOR {remote_filename}", f)
+    try:
+        with open(local_path, "rb") as f:
+            ftps.storbinary(f"STOR {remote_filename}", f)
+        # upload_logger.info(f"File uploaded successfully: {remote_filename}")
+    except FileNotFoundError:
+        upload_logger.error(f"Local file not found: {local_path}")
+    except Exception as e:
+        upload_logger.error(f"Error during file upload: {e}", exc_info=True)
+        
     # اعتبارسنجی فایل روی سرور
     downloaded = io.BytesIO()
     ftps.retrbinary(f"RETR {remote_filename}", downloaded.write)
     downloaded.seek(0)
+    try:
+        downloaded = io.BytesIO()
+        ftps.retrbinary(f"RETR {remote_filename}", downloaded.write)
+        downloaded.seek(0)
+        # upload_logger.info(f"Remote file retrieved successfully: {remote_filename}")
+    except Exception as e:
+        upload_logger.error(f"Error during remote file verification {remote_filename}: {e}", exc_info=True)
+        
     try:
         if remote_filename.lower().endswith('.pdf'):
             fitz.open(stream=downloaded.read(), filetype="pdf").close()
