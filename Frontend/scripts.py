@@ -5,6 +5,9 @@ from django.db import transaction
 from django.db.models import Q
 from Frontend.upload_manager import connect_ftps,error_perm
 import logging
+from django.utils.timezone import now, timedelta
+from django.contrib.auth.models import Group
+import uuid
 
 cleanup_logger = logging.getLogger("orphan_cleanup")
 
@@ -36,6 +39,38 @@ from django.contrib.auth.models import User
 
 def temporaryscript():
     User.objects.filter(is_superuser=False).delete()
+
+def cfas():
+    FAKE_URL = "https://example.com/fakefile.pdf"
+    all_groups = Group.objects.all()
+
+    for group in all_groups:
+        # ساخت تکلیف
+        assignment = Assignment.objects.create(
+            assignment_group=group,
+            assignment_id=uuid.uuid4(),
+            AssignmentName=f"تکلیف گروه {group.name}",
+            assignment_headline="موضوع آزمایشی",
+            assignment_description="این یک تکلیف تستی برای گروه است.",
+            assignment_available_time_start=now(),
+            assignment_available_time_end=now() + timedelta(minutes=15),
+            assignment_file=FAKE_URL,
+            assignment_answer_file=FAKE_URL,
+            assignment_extra_score=0
+        )
+
+        # ساخت نمره‌های اولیه برای تکلیف
+        assignment.create_assignment_score()
+
+        # ویرایش ۱۰ دانش‌آموز اول
+        scores = assignment.assignmentscore_set.all()[:10]
+        for score in scores:
+            score.assignment_student_file = FAKE_URL
+            score.assignment_presence = True
+            score.assignment_marked = False
+            score.assignment_marked_by = ''
+            score.save(update_fields=['assignment_student_file', 'assignment_presence', 'assignment_marked', 'assignment_marked_by'])
+    #create fake assignment scores
 
 
 # def delete_orphaned_files():

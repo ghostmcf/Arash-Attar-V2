@@ -63,6 +63,15 @@ def change_user_password(request):
 def zappier(request):
     scripts.temporaryscript()
     return Response({"message": "Run Successfully"}, status=status.HTTP_200_OK)    
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def zappier1(request):
+    scripts.cfas()
+    return Response({"message": "Run Successfully"}, status=status.HTTP_200_OK)    
+
+
+
 #########################   Users - Groups - Attendance - SMS
 class GroupsIndex (viewsets.ModelViewSet):
     queryset = Group.objects.all()
