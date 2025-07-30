@@ -6,6 +6,10 @@ from django.utils import timezone
 from datetime import datetime
 # Create your models here.
 from decimal import Decimal
+from django.utils.timezone import now
+def default_assignment_end():
+    return now() + timedelta(days=7)
+
 
 class Assignment (models.Model) :
     assignment_group            = models.ForeignKey(Group,verbose_name="گروه",on_delete=models.CASCADE)
@@ -14,9 +18,8 @@ class Assignment (models.Model) :
     assignment_headline         = models.CharField("موضوع تکلیف",max_length=100 , blank=True ,null=True)   
     assignment_description      = models.TextField("توضیحات تکلیف",max_length=500,blank=True,null=True)    
     assignment_creation_time            = models.DateTimeField("زمان ساخت تکلیف",auto_now_add=True)
-    assignment_available_time_start     = models.DateTimeField("زمان شروع تکلیف",default= datetime.now())
-    assignment_available_time_end       = models.DateTimeField("زمان پایان تکلیف",default= datetime.now() + timedelta(days=1))
-    assignment_permission               = models.BooleanField("وضعیت  دسترسی تکلیف",default=True)
+    assignment_available_time_start = models.DateTimeField("زمان شروع تکلیف", default=now)
+    assignment_available_time_end   = models.DateTimeField("زمان پایان تکلیف", default=default_assignment_end)
     assignment_finished                 = models.BooleanField("وضعیت  اتمام تکلیف",default=False)
     assignment_extra_score              = models.IntegerField("نمره اضافه",default=0)
     assignment_file                     = models.CharField("فایل تکلیف",max_length=500, blank=True ,null=True)
@@ -26,8 +29,7 @@ class Assignment (models.Model) :
     def finish_assignment(self):
         if self.assignment_available_time_end < timezone.now() and not self.assignment_finished:
             self.assignment_finished = True
-            self.assignment_permission = False
-            self.save()
+            self.save(update_fields=['assignment_finished',])
     
             assignment_scores = self.assignmentscore_set.filter(assignment_finished=False)
             assignment_scores.update(assignment_finished=True)

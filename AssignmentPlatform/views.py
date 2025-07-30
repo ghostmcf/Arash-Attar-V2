@@ -66,7 +66,6 @@ class AssignmentViewSet(viewsets.ViewSet):
                         "assignment_headline": guided_headline,
                         "assignment_available_time_end": i.assignment.assignment_available_time_end,
                         "assignment_finished": i.assignment.assignment_finished,
-                        "assignment_permission": i.assignment.assignment_permission,
                         "assignment_extra_permission": i.assignment_permission,
                     }
                     try :
@@ -86,18 +85,21 @@ class AssignmentViewSet(viewsets.ViewSet):
                         
                     assignment_dict.append(temp_dict)
             return Response(assignment_dict, status=status.HTTP_200_OK)
-
     def retrieve(self, request, pk=None):
         selected_assignment = get_object_or_404(Assignment, pk=pk)
         try:
             a = request.user.assignmentaverage.assignmentscore_set.select_related('assignment').get(assignment=pk)
-            a.assignment_permission
-        except:
+        except AssignmentScore.DoesNotExist:
             return Response({"message": "You are not allowed"}, status=status.HTTP_403_FORBIDDEN)
-        else:
-            return Response({"Assignment": AssignmentSerializer(selected_assignment).data, "Presence": AssignmentScoreSerializer(a).data}, status=status.HTTP_200_OK)
 
+        if a.assignment_finished:
+            return Response({"message": "This assignment is already finished"}, status=status.HTTP_403_FORBIDDEN)
 
+        return Response({
+            "Assignment": AssignmentSerializer(selected_assignment).data,
+            "Presence": AssignmentScoreSerializer(a).data
+        }, status=status.HTTP_200_OK)
+        
 # Setup logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

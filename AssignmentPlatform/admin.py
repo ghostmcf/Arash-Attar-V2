@@ -6,8 +6,8 @@ from . import models
 
 @admin.register(models.Assignment)
 class AssignmentAdmin(admin.ModelAdmin):
-    list_display = ('AssignmentName', 'assignment_group', 'assignment_headline', 'assignment_id', 'assignment_available_time_start', 'assignment_permission', 'assignment_finished')
-    list_filter = ('assignment_group', 'assignment_creation_time', 'assignment_permission')
+    list_display = ('AssignmentName', 'assignment_group', 'assignment_headline', 'assignment_id', 'assignment_available_time_start', 'assignment_finished')
+    list_filter = ('assignment_group', 'assignment_creation_time',)
     fieldsets = (
         ("مشخصات تکلیف", {
             'fields': (('AssignmentName', 'assignment_headline', 'assignment_id'), ('assignment_group',), ('assignment_description'), ('assignment_file', 'assignment_answer_file'),)
@@ -16,7 +16,7 @@ class AssignmentAdmin(admin.ModelAdmin):
             'fields': ('assignment_available_time_start', 'assignment_available_time_end'),
         }),
         ('تنظیمات تکلیف', {
-            'fields': (('assignment_permission', 'assignment_finished'), ('assignment_extra_score',))
+            'fields': (('assignment_finished'), ('assignment_extra_score',))
         })
     )
 

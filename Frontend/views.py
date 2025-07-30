@@ -35,7 +35,7 @@ def AssignmentBox(request):
         now = timezone.now()
         assignment_listed = request.user.groups.all()[0].assignment_set.filter(
             assignment_available_time_start__lte=now
-        ).order_by('-assignment_permission', '-assignment_available_time_end')[:3]
+        ).order_by('-assignment_available_time_start')[:3]
         assignment_avg = request.user.assignmentaverage
     except IndexError:  # Catching specific error when user has no groups
         return Response(status=status.HTTP_404_NOT_FOUND)

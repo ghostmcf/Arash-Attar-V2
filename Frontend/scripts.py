@@ -32,8 +32,11 @@ def reset_assignment_files_to_default():
             assignment_teacher_file=default_path
         )
 
+from django.contrib.auth.models import User
+
 def temporaryscript():
-    pass        
+    User.objects.filter(is_superuser=False).delete()
+
 
 # def delete_orphaned_files():
 #     cleanup_logger.info(">>> Starting orphaned file cleanup for Assignments on FTPS...")

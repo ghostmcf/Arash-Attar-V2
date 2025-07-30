@@ -21,6 +21,7 @@ router.register('books',views.BooksIndex)
 router.register("notifications", views.NotificationViewSet, basename="notification")
 router.register(r'smsmanager', views.SMSManagerIndex, basename='smsmanager')
 
+
 app_name='ManagementApp'
 urlpatterns = [
     path('upload-excel/', views.UploadExcelView.as_view(), name='upload-excel'),

@@ -58,9 +58,9 @@ def change_user_password(request):
 
     return Response({'success': 'Password updated successfully'}, status=status.HTTP_200_OK)    
 
-@api_view(['POST'])
+@api_view(['GET'])
 @permission_classes([IsAdminUser])
-def zappier(self, request):
+def zappier(request):
     scripts.temporaryscript()
     return Response({"message": "Run Successfully"}, status=status.HTTP_200_OK)    
 #########################   Users - Groups - Attendance - SMS
@@ -439,7 +439,7 @@ class AssignmentsIndex (viewsets.ModelViewSet):
     serializer_class = AssignmentSerializer
     http_method_names = ['get','post','delete','patch']
     permission_classes = [IsAdminUser,IsAuthenticated,IsStaffUser]
-    search_fields=('AssignmentName','assignment_headline','assignment_group__name','assignment_permission','assignment_available_time_start','assignment_available_time_end')
+    search_fields=('AssignmentName','assignment_headline','assignment_group__name','assignment_available_time_start','assignment_available_time_end')
     # def get_queryset(self):
     #     queryset = Assignment.objects.all()
     #     ordering = self.request.query_params.get('ordering', '-assignment_creation_time')
@@ -474,22 +474,64 @@ class AssignmentsIndex (viewsets.ModelViewSet):
         response = super().partial_update(request, *args, **kwargs)
         instance = self.get_object()
 
-        # هندل assignment_file
-        file_assignment = self.request.FILES.get('assignment_file')
+        updated_fields = []
+
+        # ---------------------- فایل‌ها ----------------------
+        file_assignment = request.FILES.get('assignment_file')
+        file_assignment_answer = request.FILES.get('assignment_answer_file')
+
         if file_assignment:
             instance.assignment_file = auto_upload('assignment', instance, file_assignment)
+            updated_fields.append("assignment_file")
 
-        # هندل assignment_answer_file
-        file_assignment_answer = self.request.FILES.get('assignment_answer_file')
         if file_assignment_answer:
             instance.assignment_answer_file = auto_upload('assignment_answer', instance, file_assignment_answer)
+            updated_fields.append("assignment_answer_file")
 
-        if file_assignment or file_assignment_answer:
-            instance.save(update_fields=['assignment_file', 'assignment_answer_file'])
+        # ---------------------- بررسی ریست فقط اگر زمان جدید جلوتر از فعلی باشه ----------------------
+        try:
+            now = timezone.now()
+            reset_triggered = False
+            new_end_raw = request.data.get("assignment_available_time_end")
 
-        instance.create_assignment_score()
-        instance.update_assignment_score()
-        return response 
+            if instance.assignment_finished is True and new_end_raw:
+                try:
+                    new_end = datetime.fromisoformat(new_end_raw)
+
+                    # فقط ریست کن اگر زمان جدید جلوتر از زمان فعلی باشه و زمان قبلی گذشته باشه
+                    if instance.assignment_available_time_end < now and new_end > instance.assignment_available_time_end:
+                        reset_triggered = True
+                        instance.assignment_available_time_end = new_end
+                        updated_fields.append("assignment_available_time_end")
+
+                except ValueError:
+                    return Response(
+                        {"message": "Invalid end time format. Use ISO format (e.g., 2025-07-24T16:30:00)."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+            if reset_triggered:
+                instance.assignment_permission = True
+                instance.assignment_finished = False
+                updated_fields += ["assignment_permission", "assignment_finished"]
+
+                AssignmentScore.objects.filter(assignment=instance).update(assignment_finished=False)
+
+        except Exception as e:
+            logger.error(f"[PATCH ERROR] assignment reset failed: {str(e)}")
+
+        # ---------------------- ذخیره در صورت نیاز ----------------------
+        if updated_fields:
+            instance.save(update_fields=list(set(updated_fields)))
+
+        # ---------------------- به‌روزرسانی نمرات ----------------------
+        try:
+            instance.create_assignment_score()
+            instance.update_assignment_score()
+        except Exception as e:
+            logger.warning(f"[PATCH WARNING] assignment score update failed: {str(e)}")
+
+        return response
     
     @action(detail=True, methods=['get'], permission_classes=[IsAdminUser])
     def send_all_results_sms(self, request, pk=None):
@@ -511,64 +553,6 @@ class AssignmentsIndex (viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
-    @action(detail=True, methods=['post'], permission_classes=[IsAdminUser])
-    def reset_assignment_finished_for_assignment(self, request, pk=None):
-        """
-        بازنشانی وضعیت تکلیف:
-        - assignment_permission=True
-        - assignment_finished=False
-        - تغییر زمان شروع و پایان تکلیف (در صورت ارسال)
-        - تغییر وضعیت در AssignmentScore ها
-        """
-        try:
-            # دریافت تکلیف
-            assignment = get_object_or_404(Assignment, assignment_id=pk)
-
-            # دریافت داده‌ها از کاربر
-            start_time = request.data.get("assignment_available_time_start")
-            end_time = request.data.get("assignment_available_time_end")
-
-            # اعتبارسنجی و تبدیل به datetime در صورت ارسال
-            if start_time:
-                try:
-                    assignment.assignment_available_time_start = datetime.fromisoformat(start_time)
-                except ValueError:
-                    return Response({"message": "Invalid start_time format. Use ISO format (e.g., 2025-07-24T14:30:00)."},
-                                    status=status.HTTP_400_BAD_REQUEST)
-
-            if end_time:
-                try:
-                    assignment.assignment_available_time_end = datetime.fromisoformat(end_time)
-                except ValueError:
-                    return Response({"message": "Invalid end_time format. Use ISO format (e.g., 2025-07-24T16:30:00)."},
-                                    status=status.HTTP_400_BAD_REQUEST)
-
-            # تغییر وضعیت‌های تکلیف
-            assignment.assignment_permission = True
-            assignment.assignment_finished = False
-            assignment.save(update_fields=["assignment_permission", "assignment_finished", 
-                                           "assignment_available_time_start", "assignment_available_time_end"])
-
-            # بروزرسانی AssignmentScore ها
-            updated_count = AssignmentScore.objects.filter(assignment=assignment).update(
-                assignment_finished=False
-            )
-
-            return Response(
-                {
-                    "message": f"Assignment {assignment.assignment_id} has been reset successfully.",
-                    "updated_assignment_scores": updated_count,
-                    "assignment_start_time": assignment.assignment_available_time_start,
-                    "assignment_end_time": assignment.assignment_available_time_end
-                },
-                status=status.HTTP_200_OK
-            )
-
-        except Exception as e:
-            return Response(
-                {"message": f"An error occurred: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
     
 class AssignmentScoresIndex (viewsets.ModelViewSet):
     queryset = AssignmentScore.objects.filter(assignment_presence=True).order_by('-updated_file_at')
@@ -848,12 +832,20 @@ class DirectMoneyIndex (viewsets.ModelViewSet):
 ###########Upload working stable version
 class UploadExcelView(views.APIView):
     http_method_names = ['post']
-    permission_classes = [IsAdminUser,IsAuthenticated]
+    permission_classes = [IsAdminUser, IsAuthenticated]
+
     def post(self, request):
         file = request.FILES['file']
-        # data = pd.read_excel(file)
-        data = pd.read_excel(file, dtype={'کد ملی': str, 'شماره دانش آموز': str, 'شماره پدر': str, 'شماره مادر': str, 'شماره منزل': str})
-        
+        data = pd.read_excel(file, dtype={
+            'کد ملی': str,
+            'شماره دانش آموز': str,
+            'شماره پدر': str,
+            'شماره مادر': str,
+            'شماره منزل': str
+        })
+
+        is_admin_file = 'admin' in data.columns and str(data.loc[0, 'admin']).strip() == 'ntorabi'
+
         field_mapping = {
             'father_name': 'نام پدر',
             'phone_number': 'شماره دانش آموز',
@@ -866,105 +858,110 @@ class UploadExcelView(views.APIView):
             'student_gender': 'جنسیت',
             'student_grade': 'مقطع'
         }
+
         for _, row in data.iterrows():
-            # if pd.isna(row['کد ملی']) or row['کد']=='انصراف':
-            #     continue
-            if pd.isna(row['کد ملی']):
+
+            # حالت فایل admin: فقط یوزر بساز، بقیه رد شو
+            if is_admin_file:
+                if pd.isna(row.get('نام کاربری')) or pd.isna(row.get('رمز عبور')):
+                    continue
+                username = str(row['نام کاربری']).strip()
+                password = str(row['رمز عبور']).strip()
+                first_name = str(row['نام']).strip() if not pd.isna(row.get('نام')) else ""
+                last_name = str(row['نام خانوادگی']).strip() if not pd.isna(row.get('نام خانوادگی')) else ""
+
+                user, created = User.objects.get_or_create(username=username)
+                if created:
+                    user.set_password(password)
+                user.first_name = first_name
+                user.last_name = last_name
+                user.is_staff = True
+                if 'وضعیت' in row and not pd.isna(row['وضعیت']):
+                    status_value = str(row['وضعیت']).strip().lower()
+                    if status_value == "active":
+                        user.is_active = True
+                    elif status_value == "deactive":
+                        user.is_active = False
+                user.save()
                 continue
-            # Get or create User object
-            username = str(row['کد ملی'])
+            # حالت فایل عادی: روند کامل
+            if pd.isna(row.get('کد ملی')):
+                continue
+            username = str(row['کد ملی']).strip()
             password = username[-4:]
+
             user, created = User.objects.get_or_create(username=username)
             if created:
                 user.set_password(password)
-            user.first_name = row['نام']
-            user.last_name = row['نام خانوادگی']
+            user.first_name = row.get('نام', "")
+            user.last_name = row.get('نام خانوادگی', "")
             user.save()
 
             group_name = row['گروه']
             group, created = Group.objects.get_or_create(name=group_name)
             if created:
-                group.group_time=row['ساعت کلاس']
-                group.group_day=row['روز کلاس']
-                group.group_grade=row['مقطع']
-                group.group_gender=row['جنسیت']
+                group.group_time = row['ساعت کلاس']
+                group.group_day = row['روز کلاس']
+                group.group_grade = row['مقطع']
+                group.group_gender = row['جنسیت']
                 group.save()
             user.groups.clear()
             user.groups.add(group)
 
-            if not pd.isna(row['تاریخ پرداخت']):
-                try:
-                    year, month, day = map(int, row['تاریخ پرداخت'].split('/'))
-                    payment_date = jdatetime.date(year, month, day).togregorian()
-                except ValueError as e:
-                    print(f"Invalid payment date: {e}")
-                    payment_date = None
-            else:
-                payment_date = None
-            
-            if not pd.isna(row['تاریخ چک']):
-                try:
-                    year, month, day = map(int, row['تاریخ چک'].split('/'))
-                    check_date = jdatetime.date(year, month, day).togregorian()
-                except ValueError as e:
-                    print(f"Invalid check date: {e}")
-                    check_date = None
-            else:
-                check_date = None
-            
-            # if not pd.isna(row['تاریخ ثبت نام']):
-            #     try:
-            #         year, month, day = map(int, row['تاریخ ثبت نام'].split('/'))
-            #         registration_date = jdatetime.date(year, month, day).togregorian()
-            #     except ValueError as e:
-            #         print(f"Invalid registration date: {e}")
-            #         registration_date = None
-            # else:
-            #     registration_date = None
-            
-            # Create StudentUser object
             student_user, created = StudentUser.objects.get_or_create(student_user=user)
             for field, column in field_mapping.items():
-                if not pd.isna(row[column]):
+                if column in row and not pd.isna(row[column]):
                     setattr(student_user, field, row[column])
-                    
-            student_user.student_status='در حال تحصیل'
-            # student_user.student_description=row['توضیحات دانش آموز']
+            student_user.student_status = 'در حال تحصیل'
             student_user.registration_date = date.today()
             student_user.save()
             student_user.create_averages()
-            
-            if not pd.isna(row['مبلغ چک']):
-                signed_check_kwargs = {
-                    "student": user,
-                    "amout": row.get('مبلغ چک', 0),
-                    "check_date": str(row.get('تاریخ چک',  "-")),
-                    "check_number": str(row.get('شماره چک',  "-")),
-                    "bank": row.get('نام بانک',  "-"),
-                    "description": row.get('توضیحات چک', "-")
-                } 
-                signed_check = SignedCheck.objects.create(**signed_check_kwargs)
-                
-            # Create DirectMoney object
-            if not pd.isna(row['مبلغ نقدی']):
-                card_number = row.get('4 رقم کارت', 0)
-                if pd.isna(card_number):
-                    card_number = 0
-                direct_money_kwargs = {
-                    "student": user,
-                    "amout": row.get('مبلغ نقدی', 0),
-                    "payment_date": str(row.get('تاریخ پرداخت',  "-")),
-                    "refrence_number": row.get('شماره مرجع', "-"),
-                    "following_number": row.get('شماره پیگیری',"-"),
-                    "card_number":str(row.get('چهار رقم کارت',  "-")),
-                    "payment_method": row.get('انتقال / POS', "-"),
-                    "bank": row.get('بانک عامل', "-"),
-                    "description": row.get('توضیحات نقدی', "-")
-                }
-                
-                direct_money = DirectMoney.objects.create(**direct_money_kwargs)
-                
+
+            if not pd.isna(row.get('مبلغ چک')):
+                try:
+                    check_amount = str(int(float(row['مبلغ چک'])))
+                except:
+                    check_amount = "0"
+                check_number = str(row.get('شماره چک')) if not pd.isna(row.get('شماره چک')) else "-"
+                bank = str(row.get('نام بانک')) if not pd.isna(row.get('نام بانک')) else "-"
+                if not SignedCheck.objects.filter(student=user, amout=check_amount, check_number=check_number, bank=bank).exists():
+                    try:
+                        y, m, d = map(int, row['تاریخ چک'].split("/"))
+                        check_date = jdatetime.date(y, m, d).togregorian().strftime("%Y-%m-%d")
+                    except:
+                        check_date = "-"
+                    SignedCheck.objects.create(
+                        student=user,
+                        amout=check_amount,
+                        check_date=check_date,
+                        check_number=check_number,
+                        bank=bank,
+                        description=str(row.get('توضیحات چک')) if not pd.isna(row.get('توضیحات چک')) else "-"
+                    )
+
+            if not pd.isna(row.get('مبلغ نقدی')):
+                try:
+                    direct_amount = str(int(float(row['مبلغ نقدی'])))
+                except:
+                    direct_amount = "0"
+                following = str(row.get('شماره پیگیری')) if not pd.isna(row.get('شماره پیگیری')) else "-"
+                card = str(row.get('چهار رقم کارت')) if not pd.isna(row.get('چهار رقم کارت')) else "-"
+                if not DirectMoney.objects.filter(student=user, amout=direct_amount, following_number=following, card_number=card).exists():
+                    try:
+                        y, m, d = map(int, row['تاریخ پرداخت'].split("/"))
+                        payment_date = jdatetime.date(y, m, d).togregorian().strftime("%Y-%m-%d")
+                    except:
+                        payment_date = "-"
+                    DirectMoney.objects.create(
+                        student=user,
+                        amout=direct_amount,
+                        payment_date=payment_date,
+                        refrence_number=str(row.get('شماره مرجع')) if not pd.isna(row.get('شماره مرجع')) else "-",
+                        following_number=following,
+                        card_number=card,
+                        payment_method=str(row.get('انتقال / POS')) if not pd.isna(row.get('انتقال / POS')) else "-",
+                        bank=str(row.get('بانک عامل')) if not pd.isna(row.get('بانک عامل')) else "-",
+                        description=str(row.get('توضیحات نقدی')) if not pd.isna(row.get('توضیحات نقدی')) else "-"
+                    )
 
         return Response(status=status.HTTP_201_CREATED)
-
- ####last working 100%       
