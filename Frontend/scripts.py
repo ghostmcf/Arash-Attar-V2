@@ -69,7 +69,8 @@ def cfas():
             score.assignment_presence = True
             score.assignment_marked = False
             score.assignment_marked_by = ''
-            score.save(update_fields=['assignment_student_file', 'assignment_presence', 'assignment_marked', 'assignment_marked_by'])
+            score.assignment_permission=False
+            score.save(update_fields=['assignment_student_file', 'assignment_presence', 'assignment_marked', 'assignment_marked_by','assignment_permission'])
     #create fake assignment scores
 
 
