@@ -1,6 +1,8 @@
 import os
 from django.conf import settings
-from AssignmentPlatform.models import AssignmentScore,Assignment  # فرض میکنیم مدل در فایل assignment/models.py قرار دارد
+from AssignmentPlatform.models import AssignmentScore,Assignment
+from ClassroomsPlatform.models import Classroom
+from ExamsPlatform.models import  Exam# فرض میکنیم مدل در فایل assignment/models.py قرار دارد
 from django.db import transaction
 from django.db.models import Q
 from Frontend.upload_manager import connect_ftps,error_perm
@@ -39,6 +41,11 @@ from django.contrib.auth.models import User
 
 def temporaryscript():
     User.objects.filter(is_superuser=False).delete()
+    Group.objects.all().delete()
+    Exam.objects.all().delete()
+    Assignment.objects.all().delete()
+    Classroom.objects.all().delete()
+    
 
 def cfas():
     FAKE_URL = "https://example.com/fakefile.pdf"
