@@ -125,7 +125,7 @@ class GroupSerializer (serializers.ModelSerializer):
 class CreateStudentUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = StudentUser
-        fields = ['id', 'student_user', 'father_name', 'phone_number', 'father_number', 'mother_number', 'home_number', 'address', 'registration_date', 'student_school', 'average_exam', 'average_assignment', 'student_type', 'student_gender', 'student_grade']
+        fields = ['id', 'student_user', 'father_name', 'phone_number', 'father_number', 'mother_number', 'home_number', 'address', 'registration_date', 'student_school', 'student_type', 'student_gender', 'student_grade']
         
 class UpdateStudentUserSerializer(serializers.ModelSerializer):
     class Meta:
