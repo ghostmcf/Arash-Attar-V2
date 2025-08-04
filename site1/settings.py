@@ -133,7 +133,7 @@ DATABASES = {
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "unix:/home/arashat1/redis/redis.sock?db=0",
+        "LOCATION": "unix://home/arashat1/redis/redis.sock?db=0",
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         }
