@@ -51,22 +51,25 @@ class AssignmentViewSet(viewsets.ViewSet):
                             jalali_datetime = jdatetime.datetime.fromgregorian(datetime=localized_time)
                             persian_month = persian_months[jalali_datetime.strftime('%B')]
                             # guided_headline = f"{i.assignment.assignment_headline} (در انتظار تصحیح) ارسال در: {jalali_datetime.strftime('%d')} {persian_month} {jalali_datetime.strftime('%H:%M')}"
-                            guided_headline = f" ارسال در: {jalali_datetime.strftime('%d')} {persian_month} {jalali_datetime.strftime('%H:%M')}"
+                            guided_headline = f"{i.assignment.assignment_headline} (در انتظار تصحیح)"
+                            guided_sentstatus = f" ارسال در: {jalali_datetime.strftime('%d')} {persian_month} {jalali_datetime.strftime('%H:%M')}"
                         else:
-                            # guided_headline = f'{i.assignment.assignment_headline} (در انتظار تصحیح – ایراد در فایل)'
-                            guided_headline = "ایراد در فایل"
+                            guided_headline = f'{i.assignment.assignment_headline} (در انتظار تصحیح – ایراد در فایل)'
+                            # guided_headline = "ایراد در فایل"
+                            guided_sentstatus= "ایراد در فایل"
                     else:
                         guided_score=AssignmentScoreSerializer(i).data
-                        guided_headline=""
+                        guided_headline= i.assignment.assignment_headline
+                        guided_sentstatus= ""
                     temp_dict = {
                         # "score": AssignmentScoreSerializer(i).data,
                         "score": guided_score,
                         "assignment_available_time_end": i.assignment.assignment_available_time_end,
                         "assignment_file": i.assignment.assignment_file,
                         "AssignmentName": i.assignment.AssignmentName,
-                        "assignment_headline": i.assignment.assignment_headline,
-                        # "assignment_headline": guided_headline,
-                        "assignment_filestatus": guided_headline,
+                        # "assignment_headline": i.assignment.assignment_headline,
+                        "assignment_headline": guided_headline,
+                        "assignment_filestatus": guided_sentstatus,
                         "assignment_available_time_end": i.assignment.assignment_available_time_end,
                         "assignment_finished": i.assignment.assignment_finished,
                         "assignment_extra_permission": i.assignment_permission,
