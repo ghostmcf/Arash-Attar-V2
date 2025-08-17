@@ -8,7 +8,7 @@ from StudentsInfo.serializers import NotificationSerializer, UserNotificationSer
 from django.contrib.auth.models import Group,User
 from rest_framework.decorators import api_view,action
 from rest_framework.response import Response
-from rest_framework import status,viewsets,views
+from rest_framework import status,viewsets,views,parsers
 # from rest_framework.parsers import MultiPartParser
 from rest_framework.decorators import api_view,permission_classes
 from rest_framework.permissions import IsAuthenticated,IsAdminUser,BasePermission,AllowAny
@@ -22,6 +22,8 @@ import jdatetime
 from datetime import date,datetime
 from django.shortcuts import get_object_or_404
 import logging
+from django.utils import timezone
+from drf_yasg.utils import swagger_auto_schema
 ## SMS
 # import requests
 # import json
@@ -484,7 +486,7 @@ class AssignmentsIndex (viewsets.ModelViewSet):
         instance = self.get_object()
 
         updated_fields = []
-
+        logger = logging.getLogger('admins_manager')
         # ---------------------- فایل‌ها ----------------------
         file_assignment = request.FILES.get('assignment_file')
         file_assignment_answer = request.FILES.get('assignment_answer_file')
@@ -561,8 +563,7 @@ class AssignmentsIndex (viewsets.ModelViewSet):
                 {"message": f"An error occurred: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-    
-    
+     
 class AssignmentScoresIndex (viewsets.ModelViewSet):
     queryset = AssignmentScore.objects.filter(assignment_presence=True).order_by('-updated_file_at')
     serializer_class = AssignmentScoreSerializer
@@ -570,6 +571,12 @@ class AssignmentScoresIndex (viewsets.ModelViewSet):
     permission_classes = [IsAdminUser,IsAuthenticated,IsStaffUser]
     search_fields=('assignment_average_reffer__user__first_name','assignment_average_reffer__user__last_name','assignment__AssignmentName','assignment_presence','assignment_finished','assignment_marked','assignment_marked_by')
     
+    def get_queryset(self):
+        # برای صفحه‌ی index همان قبلی بماند، اما اکشن manual به همه دسترسی داشته باشد
+        if getattr(self, 'action', None) == 'manual_assignmentscore':
+            return AssignmentScore.objects.all().order_by('-updated_file_at')
+        return super().get_queryset()
+
     def get_serializer_class(self):
         if self.action == 'list':
             return AssignmentScoresSerializer
@@ -595,7 +602,7 @@ class AssignmentScoresIndex (viewsets.ModelViewSet):
         response = super().partial_update(request, *args, **kwargs)
         instance.refresh_from_db()
         instance.get_score()
-
+        logger.info(f"Assignment {instance.pk} Marked By:{request.user.username}")    
         return response
     
     @action(detail=True, methods=['get'], permission_classes=[IsAdminUser])
@@ -617,6 +624,66 @@ class AssignmentScoresIndex (viewsets.ModelViewSet):
                 {"message": f"An error occurred: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )  
+    
+    @swagger_auto_schema(auto_schema=None)
+    @action(detail=True,methods=['patch'],permission_classes=[IsAdminUser],parser_classes=[parsers.MultiPartParser, parsers.FormParser])
+    def manual_assignmentscore(self, request, pk=None):
+        try:
+            instance: AssignmentScore = self.get_object()
+            admin_user = request.user.get_username()
+            logger = logging.getLogger('admins_manager')
+            logger.info(f"Manual upload sending by '{admin_user}' - {instance.pk}")
+
+            # دریافت فایل
+            file_obj = request.FILES.get('file') or request.data.get('file')
+            if not file_obj or not hasattr(file_obj, 'name'):
+                return Response({"message": "No file provided. Use form field 'file'."},
+                                status=status.HTTP_400_BAD_REQUEST)
+
+            # توجه: خارج از محدودیت — چک نوع/سایز اجباری نیست.
+            # اگر خواستی فقط PDF بپذیری، این دو خط را uncomment کن:
+            if not file_obj or not hasattr(file_obj, 'size'):
+                logger.error("* No file was uploaded or the uploaded object is not a file.")
+                return response.Response({"message": "No file was uploaded or invalid file type"}, status=status.HTTP_400_BAD_REQUEST)
+            # logger.info(f"Received file: {file_obj.name} with size: {file_obj.size} bytes")            
+            if file_obj.size > 10 * 1024 * 1024:
+                logger.error("* Upload attempt failed - file size exceeds limit.")
+                return response.Response({"message": "File too large"}, status=status.HTTP_400_BAD_REQUEST)
+
+            if not file_obj.name.lower().endswith('.pdf'):
+                logger.error("* Upload attempt failed - incorrect file type.")
+                return response.Response({"message": "Invalid file type"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # ذخیره فایل با همان util پروژه
+            stored_path = auto_upload("assignment_student", instance, file_obj)
+
+            # به‌روزرسانی وضعیت‌ها
+            instance.assignment_student_file = stored_path
+            instance.assignment_presence = True
+            instance.assignment_marked = False
+            instance.assignment_marked_by = f"{request.user.first_name} {request.user.last_name}"
+            instance.updated_file_at = timezone.now()
+            instance.save(update_fields=[
+                'assignment_student_file',
+                'assignment_presence',
+                'assignment_marked',
+                'assignment_marked_by',
+                'updated_file_at'
+            ])
+
+            logger.info(f"Manual upload OK by '{admin_user}' - {instance.pk}")
+            return Response({
+                "message": "File uploaded successfully by admin.",
+                "file_url": instance.assignment_student_file
+            }, status=status.HTTP_200_OK)
+
+        except AssignmentScore.DoesNotExist:
+            return Response({"message": "AssignmentScore not found."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.exception("Manual upload failed")
+            return Response({"message": f"An error occurred: {str(e)}"},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                     
     # @action(detail=False, methods=['get'], permission_classes=[IsAdminUser])
     # def identify_orphaned_assignments(self, request):
     #     scripts.identify_orphaned_files()
@@ -974,3 +1041,8 @@ class UploadExcelView(views.APIView):
                     )
 
         return Response(status=status.HTTP_201_CREATED)
+    
+    
+    
+    
+    

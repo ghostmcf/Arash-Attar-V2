@@ -3,7 +3,7 @@ import os
 import io
 import fitz
 import logging
-from ftplib import FTP_TLS,error_perm
+from ftplib import FTP_TLS,error_perm,FTP
 from uuid import uuid4
 from django.conf import settings
 from PIL import Image
@@ -20,20 +20,34 @@ TEMP_DIR = settings.TEMP_UPLOAD_DIR
 # ---------------------------
 # اتصال FTPS
 # ---------------------------
+# def connect_ftps():
+#     try:
+#         ftps = FTP_TLS()
+#         ftps.connect(settings.FTPS_HOST, settings.FTPS_PORT, timeout=15)
+#         ftps.auth()
+#         ftps.login(settings.FTPS_USER, settings.FTPS_PASSWORD)
+#         ftps.prot_p()
+#         return ftps
+#     except error_perm as e:
+#         upload_logger.error(f"Permission error during FTPS connection: {e}")
+#     except TimeoutError as e:
+#         upload_logger.error(f"FTPS Connection timed out: {e}")
+#     except Exception as e:
+#         upload_logger.error(f"Unexpected FTPS error: {e}", exc_info=True)
+#     return None
+
 def connect_ftps():
     try:
-        ftps = FTP_TLS()
-        ftps.connect(settings.FTPS_HOST, settings.FTPS_PORT, timeout=15)
-        ftps.auth()
-        ftps.login(settings.FTPS_USER, settings.FTPS_PASSWORD)
-        ftps.prot_p()
-        return ftps
+        ftp = FTP()
+        ftp.connect(settings.FTPS_HOST, settings.FTPS_PORT, timeout=15)
+        ftp.login(settings.FTPS_USER, settings.FTPS_PASSWORD)
+        return ftp
     except error_perm as e:
-        upload_logger.error(f"Permission error during FTPS connection: {e}")
+        upload_logger.error(f"Permission error during FTP connection: {e}")
     except TimeoutError as e:
-        upload_logger.error(f"FTPS Connection timed out: {e}")
+        upload_logger.error(f"FTP Connection timed out: {e}")
     except Exception as e:
-        upload_logger.error(f"Unexpected FTPS error: {e}", exc_info=True)
+        upload_logger.error(f"Unexpected FTP error: {e}", exc_info=True)
     return None
 # ---------------------------
 # اعتبارسنجی فایل‌ها
@@ -229,7 +243,7 @@ def auto_upload(file_type, instance, file_obj=None, extra_data=None):
         group_slug = slugify(instance.assignment.assignment_group.name, allow_unicode=True)
         assignment_slug = slugify(instance.assignment.AssignmentName, allow_unicode=True)
         username = instance.assignment_average_reffer.user.username
-        remote_dir = f"Assignments/{group_slug}/{assignment_slug}/students/{username}/"
+        remote_dir = f"Arash-Attar/Assignments/{group_slug}/{assignment_slug}/students/{username}/"
         remote_filename = f"{username}.{ext}"
         remote_created = f"{group_slug}/{assignment_slug}/students/{username}/"
         baseurl = 'https://assignments.arash-attar.com' 
@@ -238,7 +252,7 @@ def auto_upload(file_type, instance, file_obj=None, extra_data=None):
         group_slug = slugify(instance.assignment.assignment_group.name, allow_unicode=True)
         assignment_slug = slugify(instance.assignment.AssignmentName, allow_unicode=True)
         username = instance.assignment_average_reffer.user.username
-        remote_dir = f"Assignments/{group_slug}/{assignment_slug}/students/{username}/"
+        remote_dir = f"Arash-Attar/Assignments/{group_slug}/{assignment_slug}/students/{username}/"
         remote_filename = f"{username}-marked.{ext}"
         remote_created = f"{group_slug}/{assignment_slug}/students/{username}/"
         baseurl = 'https://assignments.arash-attar.com' 
@@ -247,7 +261,7 @@ def auto_upload(file_type, instance, file_obj=None, extra_data=None):
         group_slug = slugify(instance.assignment_group.name, allow_unicode=True)
         assignment_slug = slugify(instance.AssignmentName, allow_unicode=True)
         assignment_id_slug = slugify(instance.assignment_id, allow_unicode=True)
-        remote_dir = f"Assignments/{group_slug}/{assignment_slug}/"
+        remote_dir = f"Arash-Attar/Assignments/{group_slug}/{assignment_slug}/"
         remote_filename = f"{assignment_id_slug}.{ext}"
         remote_created = f"{group_slug}/{assignment_slug}/"
         baseurl = 'https://assignments.arash-attar.com' 
@@ -256,7 +270,7 @@ def auto_upload(file_type, instance, file_obj=None, extra_data=None):
         group_slug = slugify(instance.assignment_group.name, allow_unicode=True)
         assignment_slug = slugify(instance.AssignmentName, allow_unicode=True)
         assignment_id_slug = slugify(instance.assignment_id, allow_unicode=True)
-        remote_dir = f"Assignments/{group_slug}/{assignment_slug}/"
+        remote_dir = f"Arash-Attar/Assignments/{group_slug}/{assignment_slug}/"
         remote_filename = f"{assignment_id_slug}-Ans.{ext}"      
         remote_created = f"{group_slug}/{assignment_slug}/"
         baseurl = 'https://assignments.arash-attar.com'  
@@ -264,7 +278,7 @@ def auto_upload(file_type, instance, file_obj=None, extra_data=None):
     elif file_type == "exam_description":
         group_slug = slugify(instance.exam_group.name, allow_unicode=True)
         exam_slug = slugify(instance.ExamName, allow_unicode=True)
-        remote_dir = f"Exams/{group_slug}/{exam_slug}/"
+        remote_dir = f"Arash-Attar/Exams/{group_slug}/{exam_slug}/"
         remote_filename = f"{exam_slug}-file.{ext}"
         remote_created = f"{group_slug}/{exam_slug}/"
         baseurl = 'https://exams.arash-attar.com'
@@ -272,7 +286,7 @@ def auto_upload(file_type, instance, file_obj=None, extra_data=None):
     elif file_type == "exam_answer":
         group_slug = slugify(instance.exam_group.name, allow_unicode=True)
         exam_slug = slugify(instance.ExamName, allow_unicode=True)
-        remote_dir = f"Exams/Groups/{group_slug}/{exam_slug}/"
+        remote_dir = f"Arash-Attar/Exams/Groups/{group_slug}/{exam_slug}/"
         remote_filename = f"{exam_slug}-Ans.{ext}"
         remote_created = f"Groups/{group_slug}/{exam_slug}/"
         baseurl = 'https://exams.arash-attar.com'
@@ -280,7 +294,7 @@ def auto_upload(file_type, instance, file_obj=None, extra_data=None):
     elif file_type == "question":
         category_slug = slugify(instance.question_category, allow_unicode=True)
         question_id = slugify(instance.question_id)
-        remote_dir = f"Exams/Questions/{category_slug}/"
+        remote_dir = f"Arash-Attar/Exams/Questions/{category_slug}/"
         remote_filename = f"{question_id}.{ext}"
         remote_created = f"Questions/{category_slug}/"
         baseurl = 'https://exams.arash-attar.com'
@@ -288,7 +302,7 @@ def auto_upload(file_type, instance, file_obj=None, extra_data=None):
     elif file_type == "question_answer":
         category_slug = slugify(instance.question_category, allow_unicode=True)
         question_id = slugify(instance.question_id)
-        remote_dir = f"Exams/Questions/{category_slug}/"
+        remote_dir = f"Arash-Attar/Exams/Questions/{category_slug}/"
         remote_filename = f"{question_id}-Ans.{ext}"
         remote_created = f"Questions/{category_slug}/"
         baseurl = 'https://exams.arash-attar.com'

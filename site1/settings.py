@@ -130,18 +130,18 @@ DATABASES = {
     }
 }
 
-CACHES = {
-    "default": {
-        "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "unix:///home/arashat1/redis/redis.sock?db=0",
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
-        }
-    }
-}
+# CACHES = {
+#     "default": {
+#         "BACKEND": "django_redis.cache.RedisCache",
+#         "LOCATION": "unix:///home/arashat1/redis/redis.sock?db=0",
+#         "OPTIONS": {
+#             "CLIENT_CLASS": "django_redis.client.DefaultClient",
+#         }
+#     }
+# }
 
-SESSION_ENGINE = "django.contrib.sessions.backends.cache"
-SESSION_CACHE_ALIAS = "default"
+# SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+# SESSION_CACHE_ALIAS = "default"
 
 ### RUNFLARE DB Configs
 
@@ -204,12 +204,18 @@ CORS_ALLOWED_ORIGINS = [
     'http://localhost:3000',
 ]
 
-
-FTPS_HOST = 'ftp.arash-attar.com'
+FTPS_HOST = '176.65.241.163'
 FTPS_PORT = 21
-FTPS_USER = 'king@arash-attar.com'
-FTPS_PASSWORD = '7)?YM_)Mz+glslo%'
+FTPS_USER = 'arashat2'
+FTPS_PASSWORD = 'k!!Fc005Em5PUx'
 FTPS_BASE_URL = 'https://center.arash-attar.com'
+
+
+# FTPS_HOST = 'ftp.arash-attar.com'
+# FTPS_PORT = 21
+# FTPS_USER = 'king@arash-attar.com'
+# FTPS_PASSWORD = '7)?YM_)Mz+glslo%'
+# FTPS_BASE_URL = 'https://center.arash-attar.com'
 
 # ssh Pass: 1wSJ%G3R.e[,r9K~
 
@@ -324,11 +330,18 @@ LOGGING = {
             'encoding': 'utf-8',
         },
         'sms_log': {
-        'level': 'INFO',
-        'class': 'logging.FileHandler',
-        'filename': os.path.join(BASE_DIR, 'logs', 'sms.log'),
-        'formatter': 'custom',
-        'encoding': 'utf-8',
+            'level': 'INFO',
+            'class': 'logging.FileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'sms.log'),
+            'formatter': 'custom',
+            'encoding': 'utf-8',
+        },
+        'admin_log': {
+            'level': 'INFO',
+            'class': 'logging.FileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'admin.log'),
+            'formatter': 'custom',
+            'encoding': 'utf-8',
         },
     },
     'loggers': {
@@ -343,9 +356,14 @@ LOGGING = {
             'propagate': False,
         },
         'sms_manager': {
-        'handlers': ['sms_log'],
-        'level': 'INFO',
-        'propagate': False,
+            'handlers': ['sms_log'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'admins_manager': {
+            'handlers': ['admin_log'],
+            'level': 'INFO',
+            'propagate': False,
         },
     },
 }
