@@ -197,23 +197,23 @@ class FileUploadView(views.APIView):
             logger.info(f"---Attempting: {current_user} - {assignment_id}|{assignment_score.id}")
             
             if assignment_score.assignment.finish_assignment():
-                logger.error(f"* Upload attempt denied due to permissions or assignment status: {current_user}")
+                logger.error(f"*** Denied due to permissions or assignment status: {current_user}")
                 return response.Response({"message": "You are not allowed to upload the file"}, status=status.HTTP_403_FORBIDDEN)
             
             file_obj = request.data.get('assignment_file')
             if not file_obj or not hasattr(file_obj, 'size'):
-                logger.error(f"* No file was uploaded or the uploaded object is not a file: {current_user}")
+                logger.error(f"*** No file was uploaded or the uploaded object is not a file: {current_user}")
                 return response.Response({"message": "No file was uploaded or invalid file type"}, status=status.HTTP_400_BAD_REQUEST)
 
             # logger.info(f"Received file: {file_obj.name} with size: {file_obj.size} bytes {current_user}")
             logger.info(f"Received: {file_obj.size//1024}Kb {current_user} - {assignment_score.id}")
             
             if file_obj.size > 10 * 1024 * 1024:
-                logger.error(f"* Upload attempt failed - file size exceeds limit: {current_user}")
+                logger.error(f"*** Failed - size exceeds limit: {current_user}")
                 return response.Response({"message": "File too large"}, status=status.HTTP_400_BAD_REQUEST)
 
             if not file_obj.name.lower().endswith('.pdf'):
-                logger.error("* Upload attempt failed - incorrect file type: {current_user}")
+                logger.error(f"*** Failed - incorrect type: {file_obj.name.split('.')[-1].lower()} - {current_user}")
                 return response.Response({"message": "Invalid file type"}, status=status.HTTP_400_BAD_REQUEST)
             
             logger.info(f"Uploading: {current_user} - {assignment_score.id}")
