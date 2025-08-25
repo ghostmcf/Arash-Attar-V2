@@ -361,6 +361,26 @@ LOGGING = {
 }
 
 
+JAZZMIN_SETTINGS = {
+    "site_title": "By MindEscape",
+    "site_header": "Attar LMS Control Panel",
+    "show_ui_builder": True,
+    "copyright": "<a href='https://mindescape.co'>MindEscape</a> & Amir Hadizade",
+    "site_logo": "branding/mlogo.png",
+    "site_logo_classes": "img-square",
+    "site_icon": "branding/fav-ico.png", 
+}
+
+JAZZMIN_UI_TWEAKS = {
+    "theme": "simplex",
+    "dark_mode_theme": "darkly",
+    "navbar_small_text": True,
+    "footer_small_text": True,
+    "body_small_text": False,
+    "brand_small_text": True,
+}
+
+
 DATA_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 10 MB, adjust as needed
 FILE_UPLOAD_MAX_MEMORY_SIZE = 52428800
 # STATIC_URL = '/static/'
