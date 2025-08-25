@@ -23,7 +23,7 @@ from datetime import date,datetime
 from django.shortcuts import get_object_or_404
 import logging
 from django.utils import timezone
-from drf_yasg.utils import swagger_auto_schema
+# from drf_yasg.utils import swagger_auto_schema
 ## SMS
 # import requests
 # import json
@@ -486,7 +486,7 @@ class AssignmentsIndex (viewsets.ModelViewSet):
         instance = self.get_object()
 
         updated_fields = []
-        logger = logging.getLogger('admins_manager')
+        logger = logging.getLogger('management_logger')
         # ---------------------- فایل‌ها ----------------------
         file_assignment = request.FILES.get('assignment_file')
         file_assignment_answer = request.FILES.get('assignment_answer_file')
@@ -505,31 +505,44 @@ class AssignmentsIndex (viewsets.ModelViewSet):
             reset_triggered = False
             new_end_raw = request.data.get("assignment_available_time_end")
 
-            if instance.assignment_finished is True and new_end_raw:
+            if instance.assignment_finished and new_end_raw:
+                # 1) پارس رشته مثل "2025-08-29 17:32"
                 try:
-                    new_end = datetime.fromisoformat(new_end_raw)
-
-                    # فقط ریست کن اگر زمان جدید جلوتر از زمان فعلی باشه و زمان قبلی گذشته باشه
-                    if instance.assignment_available_time_end < now and new_end > instance.assignment_available_time_end:
-                        reset_triggered = True
-                        instance.assignment_available_time_end = new_end
-                        updated_fields.append("assignment_available_time_end")
-
+                    new_end_dt = datetime.strptime(new_end_raw, "%Y-%m-%d %H:%M")
                 except ValueError:
                     return Response(
-                        {"message": "Invalid end time format. Use ISO format (e.g., 2025-07-24T16:30:00)."},
+                        {"message": "Invalid end time format. Use 'YYYY-MM-DD HH:MM'."},
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-            if reset_triggered:
-                instance.assignment_permission = True
-                instance.assignment_finished = False
-                updated_fields += ["assignment_permission", "assignment_finished"]
+                # 2) aware کردن
+                if timezone.is_naive(new_end_dt):
+                    new_end_dt = timezone.make_aware(new_end_dt, timezone.get_current_timezone())
 
+                # current_end = instance.assignment_available_time_end
+                # if timezone.is_naive(current_end):
+                #     current_end = timezone.make_aware(current_end, timezone.get_current_timezone())
+
+                # print("current_end:", current_end)
+                print("new_end_dt :", new_end_dt)
+                print("now        :", now)
+                # print("current_end < now:", current_end < now)
+                print("new_end > current_end:", new_end_dt > now)
+
+                # 3) فقط اگر ددلاین قبلی گذشته و جدید جلوتره، ریست کن
+                if new_end_dt > now:
+                    reset_triggered = True
+                    instance.assignment_available_time_end = new_end_dt
+                    updated_fields.append("assignment_available_time_end")
+
+            if reset_triggered:
+                instance.assignment_finished = False
+                logger.info(f"{request.user.username} Reopen Assignment {instance.assignment_id}")
+                updated_fields += ["assignment_finished"]
                 AssignmentScore.objects.filter(assignment=instance).update(assignment_finished=False)
 
         except Exception as e:
-            logger.error(f"[PATCH ERROR] assignment reset failed: {str(e)}")
+            logger.error(f"[PATCH ERROR] assignment reset failed: {e}", exc_info=True)
 
         # ---------------------- ذخیره در صورت نیاز ----------------------
         if updated_fields:
@@ -540,8 +553,9 @@ class AssignmentsIndex (viewsets.ModelViewSet):
             instance.create_assignment_score()
             instance.update_assignment_score()
         except Exception as e:
-            logger.warning(f"[PATCH WARNING] assignment score update failed: {str(e)}")
-
+            logger.info(f"[PATCH WARNING] assignment score update failed: {str(e)}")
+            
+        logger.info(f"{request.user.username} Changed Assignment {instance.assignment_id}")
         return response
     
     @action(detail=True, methods=['get'], permission_classes=[IsAdminUser])
@@ -584,10 +598,11 @@ class AssignmentScoresIndex (viewsets.ModelViewSet):
     
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
+        logger = logging.getLogger('admins_manager')
         instance.assignment_marked = True
         instance.assignment_permission = False
         instance.assignment_marked_by = f"{request.user.first_name} {request.user.last_name}"
- 
+
         # هندل فایل تصحیح‌شده
         teacher_file = request.FILES.get('assignment_teacher_file')
         if teacher_file:
@@ -625,13 +640,13 @@ class AssignmentScoresIndex (viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )  
     
-    @swagger_auto_schema(auto_schema=None)
+    # @swagger_auto_schema(auto_schema=None)
     @action(detail=True,methods=['patch'],permission_classes=[IsAdminUser],parser_classes=[parsers.MultiPartParser, parsers.FormParser])
     def manual_assignmentscore(self, request, pk=None):
         try:
             instance: AssignmentScore = self.get_object()
             admin_user = request.user.get_username()
-            logger = logging.getLogger('admins_manager')
+            logger = logging.getLogger('management_logger')
             logger.info(f"Manual upload sending by '{admin_user}' - {instance.pk}")
 
             # دریافت فایل

@@ -11,8 +11,6 @@ certifi
 cffi
 charset-normalizer
 constantly
-coreapi
-coreschema
 cryptography
 daphne
 Django
@@ -23,7 +21,6 @@ django-jazzmin
 django-rest-framework
 djangorestframework
 drf-writable-nested
-drf-yasg
 et-xmlfile
 fastjsonschema
 fpdf
@@ -89,3 +86,6 @@ mysql
 mysqlclient
 PyMySQL
 smsir-python
+whitenoise
+drf-spectacular
+drf-spectacular-sidecar

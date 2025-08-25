@@ -142,6 +142,12 @@ def validate_file(file_obj, ext):
 # آپلود Async با Retry + Timeout
 # ---------------------------
 async def upload_to_ftps(file_obj, remote_dir, remote_filename, retries=3, timeout=30):
+    
+    if "marked" in remote_filename:
+        upload_logger = logging.getLogger("admins_manager")
+    else:
+        upload_logger = logging.getLogger("upload_manager")
+        
     upload_logger.info(f">>> Upload Started [{remote_filename}]")
     ext = file_obj.name.split('.')[-1].lower()
     if not validate_file(file_obj, ext):
@@ -174,10 +180,15 @@ async def upload_to_ftps(file_obj, remote_dir, remote_filename, retries=3, timeo
 # ---------------------------
 def _upload_file_sync(local_path, remote_dir, remote_filename):
     ftps = connect_ftps()
+    if "marked" in remote_filename:
+        upload_logger = logging.getLogger("admins_manager")
+    else:
+        upload_logger = logging.getLogger("upload_manager")
+        
     if ftps:
         pass
     else:
-        upload_logger.warning(f"FTPS connection could not be established for {remote_filename}")
+        upload_logger.error(f"FTPS connection could not be established for {remote_filename}")
     # ساخت پوشه‌ها
     dirs = remote_dir.strip("/").split("/")
     current_dir = ""

@@ -107,7 +107,7 @@ class AssignmentViewSet(viewsets.ViewSet):
         }, status=status.HTTP_200_OK)
         
 # Setup logging
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("student_assignment")
 logger.setLevel(logging.INFO)
 
 
@@ -189,39 +189,41 @@ class FileUploadView(views.APIView):
     
     def post(self, request, assignment_id, format=None):
         current_user = request.user.username if request.user.is_authenticated else 'Anonymous'
-        logger.info(f"---{timezone.now()} Attempting file upload by user: {current_user} for assignment ID: {assignment_id}")
         try:
             assignment_score = AssignmentScore.objects.get(
                 assignment=assignment_id,
                 assignment_average_reffer=request.user.assignmentaverage
             )
+            logger.info(f"---Attempting: {current_user} - {assignment_id}|{assignment_score.id}")
             
             if assignment_score.assignment.finish_assignment():
-                logger.warning("* Upload attempt denied due to permissions or assignment status.")
+                logger.error(f"* Upload attempt denied due to permissions or assignment status: {current_user}")
                 return response.Response({"message": "You are not allowed to upload the file"}, status=status.HTTP_403_FORBIDDEN)
             
             file_obj = request.data.get('assignment_file')
             if not file_obj or not hasattr(file_obj, 'size'):
-                logger.error("* No file was uploaded or the uploaded object is not a file.")
+                logger.error(f"* No file was uploaded or the uploaded object is not a file: {current_user}")
                 return response.Response({"message": "No file was uploaded or invalid file type"}, status=status.HTTP_400_BAD_REQUEST)
 
-            logger.info(f"Received file: {file_obj.name} with size: {file_obj.size} bytes")
+            # logger.info(f"Received file: {file_obj.name} with size: {file_obj.size} bytes {current_user}")
+            logger.info(f"Received: {file_obj.size//1024}Kb {current_user} - {assignment_score.id}")
             
             if file_obj.size > 10 * 1024 * 1024:
-                logger.error("* Upload attempt failed - file size exceeds limit.")
+                logger.error(f"* Upload attempt failed - file size exceeds limit: {current_user}")
                 return response.Response({"message": "File too large"}, status=status.HTTP_400_BAD_REQUEST)
 
             if not file_obj.name.lower().endswith('.pdf'):
-                logger.error("* Upload attempt failed - incorrect file type.")
+                logger.error("* Upload attempt failed - incorrect file type: {current_user}")
                 return response.Response({"message": "Invalid file type"}, status=status.HTTP_400_BAD_REQUEST)
             
+            logger.info(f"Uploading: {current_user} - {assignment_score.id}")
             assignment_score.assignment_student_file = auto_upload("assignment_student", assignment_score, file_obj)
             assignment_score.assignment_presence = True
             assignment_score.assignment_marked = False
             assignment_score.assignment_marked_by = ''
             assignment_score.updated_file_at = timezone.now()
             assignment_score.save(update_fields=['assignment_student_file', 'assignment_presence', 'updated_file_at','assignment_marked','assignment_marked_by'])
-            logger.info(f"---{timezone.now()} File upload successful by user: {current_user} for assignment ID: {assignment_id}")
+            logger.info(f"+++Successful: {current_user} - {assignment_score.id}")
             return response.Response({"message": "File uploaded and verified successfully", "file_url": assignment_score.assignment_student_file}, status=status.HTTP_200_OK)
 
         except AssignmentScore.DoesNotExist:
