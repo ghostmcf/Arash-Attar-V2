@@ -14,12 +14,14 @@ constantly
 cryptography
 daphne
 Django
+django-axes
 django-cors-headers
 django-crontab
 django-filter
 django-jazzmin
 django-rest-framework
 djangorestframework
+django-rest-knox
 drf-writable-nested
 et-xmlfile
 fastjsonschema
@@ -56,10 +58,9 @@ pyasn1_modules
 pycparser
 pyOpenSSL
 python-dateutil
+python-decouple
 pytz
 PyYAML
-django-redis
-redis
 referencing
 requests
 rpds-py
@@ -75,7 +76,6 @@ typing_extensions
 tzdata
 uritemplate
 urllib3
-uuid
 vine
 wcwidth
 XlsxWriter
@@ -89,3 +89,5 @@ smsir-python
 whitenoise
 drf-spectacular
 drf-spectacular-sidecar
+reportlab
+decouple

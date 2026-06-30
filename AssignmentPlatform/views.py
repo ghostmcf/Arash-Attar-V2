@@ -10,9 +10,19 @@ from .serializers import AssignmentSerializer, AssignmentScoreSerializer
 import jdatetime
 import pytz
 import logging
-from Frontend.upload_manager import auto_upload
+from Frontend.upload_manager import auto_upload, validate_file
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
 # Create your views here.
 
+@extend_schema_view(
+    list=extend_schema(operation_id='assignment_list', responses=OpenApiTypes.OBJECT),
+    retrieve=extend_schema(
+        operation_id='assignment_retrieve',
+        parameters=[OpenApiParameter('id', OpenApiTypes.STR, OpenApiParameter.PATH)],
+        responses=OpenApiTypes.OBJECT,
+    ),
+)
 class AssignmentViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
     def list(self, request):
@@ -70,7 +80,6 @@ class AssignmentViewSet(viewsets.ViewSet):
                         # "assignment_headline": i.assignment.assignment_headline,
                         "assignment_headline": guided_headline,
                         "assignment_filestatus": guided_sentstatus,
-                        "assignment_available_time_end": i.assignment.assignment_available_time_end,
                         "assignment_finished": i.assignment.assignment_finished,
                         "assignment_extra_permission": i.assignment_permission,
                     }
@@ -111,78 +120,8 @@ logger = logging.getLogger("student_assignment")
 logger.setLevel(logging.INFO)
 
 
-#2.9.8 > With Deleting previous file + Wont accept Corrupt file
-# class FileUploadView(views.APIView):
-#     parser_classes = (parsers.MultiPartParser, parsers.FormParser)
-#     permission_classes = [IsAuthenticated]
-#     def is_pdf_corrupt(self, file_obj):
-#         """ بررسی می‌کند که آیا فایل PDF خراب است یا خیر """
-#         try:
-#             file_obj.seek(0)  # رفتن به ابتدای فایل برای خواندن
-#             pdf_document = fitz.open(stream=file_obj.read(), filetype="pdf")  # تست باز کردن فایل
-#             pdf_document.close()
-#             file_obj.seek(0)  # ریست کردن موقعیت خواندن فایل
-#             return False  # فایل سالم است
-#         except Exception as e:
-#             logger.error(f"PDF file is corrupt: {str(e)}")
-#             return True  # فایل خراب است
-#     def post(self, request, assignment_id, format=None):
-#         current_user = request.user.username if request.user.is_authenticated else 'Anonymous'
-#         logger.info(f"---{timezone.now()} Attempting file upload by user: {current_user} for assignment ID: {assignment_id}")
-
-#         try:
-#             assignment_score = AssignmentScore.objects.get(assignment=assignment_id, assignment_average_reffer=request.user.assignmentaverage)
-#             assignment = assignment_score.assignment
-
-#             if assignment_score.assignment_finished:
-#                 logger.warning("* Upload attempt denied due to permissions or assignment status.")
-#                 return response.Response({"message": "You are not allowed to upload the file"}, status=status.HTTP_403_FORBIDDEN)
-
-#             file_obj = request.data.get('assignment_file')
-#             if not file_obj or not hasattr(file_obj, 'size'):
-#                 logger.error("* No file was uploaded or the uploaded object is not a file.")
-#                 return response.Response({"message": "No file was uploaded or invalid file type"}, status=status.HTTP_400_BAD_REQUEST)
-
-#             logger.info(f"Received file: {file_obj.name} with size: {file_obj.size} bytes")
-#             if file_obj.size > 10 * 1024 * 1024:  # 10MB size limit
-#                 logger.error("* Upload attempt failed - file size exceeds limit.")
-#                 return response.Response({"message": "File too large"}, status=status.HTTP_400_BAD_REQUEST)
-
-#             if not file_obj.name.lower().endswith('.pdf'):
-#                 logger.error("* Upload attempt failed - incorrect file type.")
-#                 return response.Response({"message": "Invalid file type"}, status=status.HTTP_400_BAD_REQUEST)
-#             # بررسی خراب بودن فایل PDF
-#             if self.is_pdf_corrupt(file_obj):
-#                 logger.error("* Upload attempt failed - corrupt PDF file.")
-#                 return response.Response({"message": "مشکلی در فایل ارسالی شما وجود دارد و رکورد جدید ثبت نمیشود"}, status=status.HTTP_400_BAD_REQUEST)
-                
-#             # حذف فایل قبلی اگر وجود داشته باشد
-#             if assignment_score.assignment_student_file:
-#                 old_file_path = assignment_score.assignment_student_file.path
-#                 if os.path.exists(old_file_path):
-#                     os.remove(old_file_path)
-#                     logger.info(f"Previous file {old_file_path} deleted successfully.")
-
-#             # ذخیره فایل جدید
-#             assignment_score.assignment_student_file = file_obj
-#             assignment_score.assignment_presence = True
-#             assignment_score.assignment_permission = False
-#             assignment_score.updated_file_at = timezone.now()
-#             assignment_score.save()
-#             logger.info("File uploaded and saved successfully.")
-
-#             return response.Response(status=status.HTTP_204_NO_CONTENT)
-
-#         except AssignmentScore.DoesNotExist:
-#             logger.error("* AssignmentScore object not found.")
-#             return response.Response({"message": "Assignment not found"}, status=status.HTTP_404_NOT_FOUND)
-#         except Exception as e:
-#             logger.error(f"* Unexpected error occurred during file upload: {str(e)}")
-#             return response.Response({"message": f"An error occurred while saving the file: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-
-#   3.2.1   >   Upload Command + FTPS + Verfication + Log & Admin + Temp Storage
+#   Upload Command + FTPS + Verfication + Log & Admin + Temp Storage
+@extend_schema_view(post=extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT))
 class FileUploadView(views.APIView):
     parser_classes = (parsers.MultiPartParser, parsers.FormParser)
     permission_classes = [IsAuthenticated]
@@ -215,7 +154,12 @@ class FileUploadView(views.APIView):
             if not file_obj.name.lower().endswith('.pdf'):
                 logger.error(f"*** Failed - incorrect type: {file_obj.name.split('.')[-1].lower()} - {current_user}")
                 return response.Response({"message": "Invalid file type"}, status=status.HTTP_400_BAD_REQUEST)
-            
+
+            # اعتبارسنجی محتوای واقعی PDF (نه صرفاً پسوند) تا فایل جعلی/خراب رد شود
+            if not validate_file(file_obj, 'pdf'):
+                logger.error(f"*** Failed - corrupt/invalid PDF content: {current_user}")
+                return response.Response({"message": "فایل ارسالی معتبر نیست یا خراب است"}, status=status.HTTP_400_BAD_REQUEST)
+
             logger.info(f"Uploading: {current_user} - {assignment_score.id}")
             assignment_score.assignment_student_file = auto_upload("assignment_student", assignment_score, file_obj)
             assignment_score.assignment_presence = True

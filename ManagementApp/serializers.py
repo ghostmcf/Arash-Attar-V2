@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth.models import User, Group
 from ClassroomsPlatform.models import Classroom
 from AssignmentPlatform.models import Assignment,AssignmentScore,AssignmentAverage
-from StudentsInfo.models import StudentUser,SignedCheck,DirectMoney,Books
+from StudentsInfo.models import StudentUser,SignedCheck,DirectMoney,Books,StudentYearRecord,YearExamRecord,YearAssignmentRecord,AttendanceRecord
 from ExamsPlatform.models import Question,Exam,ExamAverage,ExamScore
 
 
@@ -86,8 +86,15 @@ class SmallStudentInfoSerializer (serializers.ModelSerializer):
 
 class StudentInfoSerializer (serializers.ModelSerializer):
     class Meta:
-        model = StudentUser 
-        fields = "__all__"
+        model = StudentUser
+        # فیلدها صریح (به‌جای __all__)
+        fields = (
+            'id', 'student_user', 'father_name', 'phone_number', 'father_number',
+            'mother_number', 'home_number', 'address', 'registration_date',
+            'student_school', 'student_type', 'student_gender', 'student_grade',
+            'student_time', 'student_day', 'student_status', 'student_study_date',
+            'student_description',
+        )
 
 class UserSerializer (serializers.ModelSerializer):
     studentuser  = StudentInfoSerializer( read_only=True)
@@ -278,4 +285,39 @@ class ExamScoresSerializer (serializers.ModelSerializer):
     student_available_extra_time_end    = serializers.DateTimeField(format="%Y-%m-%d %H:%M", input_formats=['%Y-%m-%d %H:%M',])
     class Meta:
         model = ExamScore
-        fields = "__all__" 
+        fields = "__all__"
+
+
+# ───────────────── آرشیو سال تحصیلی (نمودار پروفایل) ─────────────────
+class YearExamRecordSerializer (serializers.ModelSerializer):
+    date = serializers.DateTimeField(format="%Y-%m-%d %H:%M", required=False)
+    class Meta:
+        model = YearExamRecord
+        fields = ('title', 'headline', 'date', 'score', 'present', 'is_offline')
+
+
+class YearAssignmentRecordSerializer (serializers.ModelSerializer):
+    date = serializers.DateTimeField(format="%Y-%m-%d %H:%M", required=False)
+    class Meta:
+        model = YearAssignmentRecord
+        fields = ('title', 'headline', 'date', 'score', 'present')
+
+
+class AttendanceRecordSerializer (serializers.ModelSerializer):
+    date = serializers.DateField(format="%Y-%m-%d", required=False)
+    class Meta:
+        model = AttendanceRecord
+        fields = ('id', 'group_name', 'session_title', 'date', 'present')
+
+
+class StudentYearRecordSerializer (serializers.ModelSerializer):
+    exam_records       = YearExamRecordSerializer(many=True, read_only=True)
+    assignment_records = YearAssignmentRecordSerializer(many=True, read_only=True)
+    class Meta:
+        model = StudentYearRecord
+        fields = (
+            'id', 'study_year', 'grade', 'group_name', 'student_type', 'status',
+            'exam_average', 'exam_final_average', 'exam_count', 'exam_absent_count',
+            'assignment_average', 'assignment_count', 'assignment_absent_count',
+            'classroom_absence_count', 'exam_records', 'assignment_records',
+        )

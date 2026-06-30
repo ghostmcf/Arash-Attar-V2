@@ -11,7 +11,7 @@ class ExamAverageSerializer (serializers.ModelSerializer):
 class ExamScoreSerializer (serializers.ModelSerializer):
     class Meta:
         model = models.ExamScore
-        fields = ("id","exam_finished","exam_peresence","student_available_extra_time_end","active_question_number","questions_list","user_choice","last_question_time","returns_count","exam","exam_average_reffer","none_counts","wrong_counts")
+        fields = ("id","exam_finished","exam_peresence","student_available_extra_time_end","active_question_number","questions_list","user_choice","returns_count","exam","exam_average_reffer","none_counts","wrong_counts")
         
         
 # class TheScoreSerializer (serializers.ModelSerializer):

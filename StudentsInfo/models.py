@@ -35,9 +35,15 @@ class StudentUser (models.Model) :
         ('در حال تحصیل','در حال تحصیل'),
         ('انصراف','انصراف'),
         ('فارغ التحصیل','فارغ التحصیل'),
-    ) ,null=True,blank=True)
+    ) ,null=True,blank=True,db_index=True)
     student_study_date                  = models.CharField("تاریخ تحصیل",max_length=60,null=True,blank=True)
     student_description                 = models.CharField("توضیحات",max_length= 300  ,null=True , blank=True)
+    # پنل پیامک: آخرین مقصدی که برای این دانش‌آموز پیامک نمره فرستادیم
+    last_sms_target                     = models.CharField("آخرین مقصد پیامک",max_length=10, choices=(
+        ('mother','مادر'),
+        ('father','پدر'),
+        ('both','هردو'),
+    ) ,null=True,blank=True)
     
     
     def student_group_info (self):
@@ -69,12 +75,13 @@ class StudentUser (models.Model) :
         existing_classroom_presences = set(C_models.ClassroomPresence.objects.filter(Q(classroom__in=classrooms) & Q(classroom_average_reffer=classroom_average)).values_list('classroom_id', flat=True))
         new_classroom_presences = [C_models.ClassroomPresence(classroom=classroom, classroom_average_reffer=classroom_average) for classroom in classrooms if classroom.classroom_id not in existing_classroom_presences]
         C_models.ClassroomPresence.objects.bulk_create(new_classroom_presences)
-        print(str(self.student_user)+"create average")
-    
-        
+
+
     def __str__(self) -> str:
-        self.student_group_info()
-        return "%s    " % (self.create_averages()) 
+        # بدون عارضه‌ی جانبی؛ student_group_info/create_averages صراحتاً در ویوها صدا زده می‌شوند
+        if self.student_user:
+            return "%s %s" % (self.student_user.first_name, self.student_user.last_name)
+        return "StudentUser %s" % self.pk
 
 class SignedCheck (models.Model) :
     student         = models.ForeignKey(User,on_delete= models.CASCADE)
@@ -149,6 +156,73 @@ class Notification(models.Model):
 class UserNotification(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
     notification = models.ForeignKey(Notification, on_delete=models.CASCADE, related_name="user_notifications")
+
+
+# ───────────────────────── آرشیو سال تحصیلی ─────────────────────────
+# هنگام بایگانی پایان سال، یک اسنپ‌شات از وضعیت تحصیلی هر دانش‌آموز ساخته می‌شود
+# تا پس از حذف Exam/Assignment/Classroom/Group، رکورد سال‌به‌سال باقی بماند.
+class StudentYearRecord (models.Model) :
+    # SET_NULL تا اگر بعداً اکانت دانش‌آموز حذف شد، تاریخچه از بین نرود
+    student                  = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='year_records', verbose_name="دانش آموز")
+    student_name             = models.CharField("نام دانش آموز", max_length=120, null=True, blank=True)
+    study_year               = models.CharField("سال تحصیلی", max_length=20, db_index=True)   # مثل "۱۴۰۳-۱۴۰۴"
+    grade                    = models.CharField("پایه", max_length=15, null=True, blank=True)   # مثل "یازدهم"
+    group_name               = models.CharField("گروه", max_length=150, null=True, blank=True)
+    student_type             = models.CharField("رشته", max_length=25, null=True, blank=True)
+    # سه میانگین کل
+    exam_average             = models.DecimalField("میانگین امتحانات", max_digits=5, decimal_places=2, default=0)
+    exam_final_average       = models.DecimalField("میانگین امتحانات (با حذف کمترین‌ها)", max_digits=5, decimal_places=2, default=0)
+    exam_count               = models.IntegerField("تعداد امتحانات", default=0)
+    exam_absent_count        = models.IntegerField("غیبت امتحان", default=0)
+    assignment_average       = models.DecimalField("میانگین تکالیف", max_digits=5, decimal_places=2, default=0)
+    assignment_count         = models.IntegerField("تعداد تکالیف", default=0)
+    assignment_absent_count  = models.IntegerField("غیبت تکلیف", default=0)
+    classroom_absence_count  = models.IntegerField("غیبت کلاس", default=0)
+    status                   = models.CharField("وضعیت پایان سال", max_length=15, null=True, blank=True)  # در حال تحصیل / فارغ التحصیل / انصراف
+    created_at               = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('student', 'study_year')
+        ordering = ['study_year', 'id']
+
+    def __str__(self) -> str:
+        return "%s - %s (%s)" % (self.student_name or self.student, self.study_year, self.grade)
+
+
+class YearExamRecord (models.Model) :
+    year_record = models.ForeignKey(StudentYearRecord, on_delete=models.CASCADE, related_name='exam_records')
+    title       = models.CharField("نام آزمون", max_length=100, null=True, blank=True)
+    headline    = models.CharField("موضوع", max_length=100, null=True, blank=True)
+    date        = models.DateTimeField("تاریخ", null=True, blank=True)
+    score       = models.DecimalField("درصد", max_digits=5, decimal_places=2, default=0)
+    present     = models.BooleanField("حضور", default=False)
+    is_offline  = models.BooleanField("آفلاین", default=False)
+
+
+class YearAssignmentRecord (models.Model) :
+    year_record = models.ForeignKey(StudentYearRecord, on_delete=models.CASCADE, related_name='assignment_records')
+    title       = models.CharField("نام تکلیف", max_length=100, null=True, blank=True)
+    headline    = models.CharField("موضوع", max_length=100, null=True, blank=True)
+    date        = models.DateTimeField("تاریخ", null=True, blank=True)
+    score       = models.DecimalField("درصد", max_digits=5, decimal_places=2, default=0)
+    present     = models.BooleanField("ارسال/حضور", default=False)
+
+
+# ───────────────────────── حضور و غیاب حضوری ─────────────────────────
+# هر ردیف = حضور/غیبت یک دانش‌آموز در یک جلسه‌ی حضوری (از اکسل مرکز همگام می‌شود).
+class AttendanceRecord (models.Model) :
+    student       = models.ForeignKey(User, on_delete=models.CASCADE, related_name='attendance_records', verbose_name="دانش آموز")
+    group_name    = models.CharField("گروه", max_length=150, null=True, blank=True)
+    session_title = models.CharField("موضوع جلسه", max_length=150, null=True, blank=True)
+    date          = models.DateField("تاریخ جلسه", null=True, blank=True, db_index=True)
+    present       = models.BooleanField("حاضر", default=True)
+    created_at    = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-date', 'id']
+
+    def __str__(self) -> str:
+        return "%s - %s (%s)" % (self.student, self.session_title, "حاضر" if self.present else "غایب")
 
 Group.add_to_class('group_time',    models.CharField("ساعت کلاس",max_length= 30
      ,null=True , blank=True))

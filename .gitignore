@@ -1,4 +1,6 @@
 Commands.txt
+.env
+.env.example
 .venv/
 AssignmentPlatform/__pycache__/
 ClassroomsPlatform/__pycache__/
@@ -18,3 +20,7 @@ info.log
 Commands.txt
 logs/
 Frontend/Queue System/
+graphify-out/
+storage.sqlite
+Arash-Attar-V2-main.zip
+Frontend/scriptsbak.py

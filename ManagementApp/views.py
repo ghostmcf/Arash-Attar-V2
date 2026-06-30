@@ -1,18 +1,25 @@
-from ClassroomsPlatform.models import Classroom,ClassroomPresence
-from AssignmentPlatform.models import Assignment,AssignmentScore
+from ClassroomsPlatform.models import Classroom,ClassroomPresence,ClassroomAverage
+from AssignmentPlatform.models import Assignment,AssignmentScore,AssignmentAverage
 from Frontend import scripts
+from Frontend import sms_manager
 from Frontend.upload_manager import auto_upload,process_content_urls
-from ExamsPlatform.models import Question,Exam,ExamScore
-from StudentsInfo.models import DirectMoney,SignedCheck,StudentUser,Books,Notification, UserNotification
+from ExamsPlatform.models import Question,Exam,ExamScore,ExamScoreOffline,ExamAverage
+from StudentsInfo.models import DirectMoney,SignedCheck,StudentUser,Books,Notification, UserNotification,StudentYearRecord,YearExamRecord,YearAssignmentRecord,AttendanceRecord
 from StudentsInfo.serializers import NotificationSerializer, UserNotificationSerializer
 from django.contrib.auth.models import Group,User
+from django.db import transaction
+from knox.models import AuthToken
+from site1.permissions import IsSuperUser
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
 from rest_framework.decorators import api_view,action
 from rest_framework.response import Response
 from rest_framework import status,viewsets,views,parsers
 # from rest_framework.parsers import MultiPartParser
 from rest_framework.decorators import api_view,permission_classes
 from rest_framework.permissions import IsAuthenticated,IsAdminUser,BasePermission,AllowAny
-from .serializers import GroupsSerializer,GroupSerializer,ClassroomSerializer,ClassroomsSerializer,AssignmentSerializer,ExamSerializer,QuestionSerializer,SmallUserSerializer,UserSerializer,AssignmentScoreSerializer,AssignmentScoresSerializer,SignedCheckSerializer,DirectMoneySerializer,ExamScoresSerializer,ExamSerializerWithQuestion,CreateStudentUserSerializer,UpdateStudentUserSerializer,ExamSerializerWithGroup,AssignmentSerializerWithGroup,BooksSerializer,BooksUserSerializer,ExamScoresSerializerWithExamName,ExamAverageNCSerializer
+from rest_framework.throttling import ScopedRateThrottle
+from .serializers import GroupsSerializer,GroupSerializer,ClassroomSerializer,ClassroomsSerializer,AssignmentSerializer,ExamSerializer,QuestionSerializer,SmallUserSerializer,UserSerializer,AssignmentScoreSerializer,AssignmentScoresSerializer,SignedCheckSerializer,DirectMoneySerializer,ExamScoresSerializer,ExamSerializerWithQuestion,CreateStudentUserSerializer,UpdateStudentUserSerializer,ExamSerializerWithGroup,AssignmentSerializerWithGroup,BooksSerializer,BooksUserSerializer,ExamScoresSerializerWithExamName,ExamAverageNCSerializer,StudentYearRecordSerializer,AttendanceRecordSerializer
 import pandas as pd
 import io
 import xlsxwriter
@@ -23,24 +30,13 @@ from datetime import date,datetime
 from django.shortcuts import get_object_or_404
 import logging
 from django.utils import timezone
-# from drf_yasg.utils import swagger_auto_schema
-## SMS
-# import requests
-# import json
-from sms_ir import SmsIr
 
-API_KEY = "YOURAPIKEY"
-LINE_NUMBER = "300000000000"
-sms_ir = SmsIr(API_KEY, LINE_NUMBER)
-
-logger = logging.getLogger('sms_manager')
-
-send_sms=''
 
 class IsStaffUser(BasePermission):
     def has_permission(self,request,view):
         return request.user and request.user.is_staff
 
+@extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT)
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
 def change_user_password(request):
@@ -55,22 +51,147 @@ def change_user_password(request):
     except User.DoesNotExist:
         return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
+    # ضدِ ارتقای دسترسی: فقط superuser می‌تواند رمز حساب‌های staff/superuser را عوض کند
+    if (user.is_staff or user.is_superuser) and not request.user.is_superuser:
+        return Response({'error': 'Only a superuser can change a staff/superuser password'},
+                        status=status.HTTP_403_FORBIDDEN)
+
     user.set_password(new_password)
     user.save()
+    # باطل‌کردن توکن‌های فعال کاربر هدف تا با رمز جدید دوباره لاگین کند
+    AuthToken.objects.filter(user=user).delete()
 
-    return Response({'success': 'Password updated successfully'}, status=status.HTTP_200_OK)    
+    return Response({'success': 'Password updated successfully'}, status=status.HTTP_200_OK)
 
-@api_view(['GET'])
-@permission_classes([IsAdminUser])
-def zappier(request):
-    scripts.temporaryscript()
-    return Response({"message": "Run Successfully"}, status=status.HTTP_200_OK)    
 
-@api_view(['GET'])
-@permission_classes([IsAdminUser])
-def zappier1(request):
-    scripts.cfas()
-    return Response({"message": "Run Successfully"}, status=status.HTTP_200_OK)    
+def _current_study_year():
+    """سال تحصیلی جلالی جاری به‌صورت 'YYYY-YYYY' (سال تحصیلی از مهر شروع می‌شود)."""
+    today = jdatetime.date.today()
+    jy = today.year
+    return f"{jy}-{jy+1}" if today.month >= 7 else f"{jy-1}-{jy}"
+
+
+@extend_schema_view(post=extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT))
+class ArchiveYearView(views.APIView):
+    """
+    بایگانی پایان سال تحصیلی (یک‌بار در آخر سال، اتمیک):
+      ۱) برای هر دانش‌آموز یک StudentYearRecord + جزئیات تک‌تک امتحان/تکلیف می‌سازد.
+      ۲) همه‌ی دانش‌آموزها را غیرفعال می‌کند (اکسل سال جدید برگشتی‌ها را دوباره فعال می‌کند).
+      ۳) Exam/Assignment/Classroom/Group و سه مدل Average را پاک می‌کند (Scoreها با CASCADE پاک می‌شوند).
+    Body اختیاری: {"study_year": "1403-1404"} — در صورت نبود، از سال جلالی جاری ساخته می‌شود.
+    """
+    permission_classes = [IsSuperUser]
+
+    def post(self, request):
+        logger = logging.getLogger('management_logger')
+        # تأیید صریح لازم است (جلوگیری از اجرای تصادفیِ این عملیات تخریبی)
+        if str(request.data.get('confirm')).lower() != 'true':
+            return Response(
+                {"error": "این عملیات همه‌ی داده‌ی تحصیلی را پاک می‌کند. برای ادامه confirm=true بفرستید."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        study_year = (request.data.get('study_year') or '').strip() or _current_study_year()
+        archived = 0
+
+        with transaction.atomic():
+            students = User.objects.filter(is_staff=False)
+            for user in students:
+                group        = user.groups.first()
+                su           = StudentUser.objects.filter(student_user=user).first()
+                exam_avg     = ExamAverage.objects.filter(user=user).first()
+                assign_avg   = AssignmentAverage.objects.filter(user=user).first()
+                class_avg    = ClassroomAverage.objects.filter(user=user).first()
+
+                # تازه‌سازی میانگین‌ها قبل از اسنپ‌شات
+                if exam_avg:   exam_avg.get_average()
+                if assign_avg: assign_avg.get_average()
+                if class_avg:  class_avg.get_absence()
+
+                grade        = (group.group_grade if group else None) or (su.student_grade if su else None)
+                group_name   = group.name if group else None
+                student_type = su.student_type if su else None
+                is_graduate  = (grade == 'دوازدهم')
+                year_status  = 'فارغ التحصیل' if is_graduate else 'در حال تحصیل'
+
+                rec, _ = StudentYearRecord.objects.update_or_create(
+                    student=user, study_year=study_year,
+                    defaults=dict(
+                        student_name=(f"{user.first_name} {user.last_name}".strip() or user.username),
+                        grade=grade, group_name=group_name, student_type=student_type,
+                        exam_average=(exam_avg.average if exam_avg else 0),
+                        exam_final_average=(exam_avg.final_average if exam_avg else 0),
+                        exam_count=(exam_avg.exam_count if exam_avg else 0),
+                        exam_absent_count=(exam_avg.exam_abscent_count if exam_avg else 0),
+                        assignment_average=(assign_avg.average if assign_avg else 0),
+                        assignment_count=(assign_avg.assignment_count if assign_avg else 0),
+                        assignment_absent_count=(assign_avg.assignment_abscent_count if assign_avg else 0),
+                        classroom_absence_count=(class_avg.absence_count if class_avg else 0),
+                        status=year_status,
+                    )
+                )
+
+                # جزئیات (idempotent: اجرای مجدد همان سال بازنویسی می‌کند)
+                rec.exam_records.all().delete()
+                rec.assignment_records.all().delete()
+
+                exam_rows = []
+                if exam_avg:
+                    for es in exam_avg.examscore_set.select_related('exam').all():
+                        exam_rows.append(YearExamRecord(
+                            year_record=rec, title=es.exam.ExamName, headline=es.exam.exam_headline,
+                            date=es.exam.exam_available_time_end, score=es.score,
+                            present=es.exam_peresence, is_offline=False))
+                    for eso in exam_avg.examscoreoffline_set.select_related('exam').all():
+                        exam_rows.append(YearExamRecord(
+                            year_record=rec, title=eso.exam.ExamName, headline=eso.exam.exam_headline,
+                            date=eso.exam.exam_available_time_end, score=eso.score,
+                            present=eso.exam_peresence, is_offline=True))
+                YearExamRecord.objects.bulk_create(exam_rows)
+
+                assign_rows = []
+                if assign_avg:
+                    for a in assign_avg.assignmentscore_set.select_related('assignment').all():
+                        assign_rows.append(YearAssignmentRecord(
+                            year_record=rec, title=a.assignment.AssignmentName, headline=a.assignment.assignment_headline,
+                            date=a.assignment.assignment_available_time_end, score=a.score,
+                            present=a.assignment_presence))
+                YearAssignmentRecord.objects.bulk_create(assign_rows)
+
+                if su:
+                    su.student_status = year_status
+                    su.save(update_fields=['student_status'])
+                archived += 1
+
+            # غیرفعال‌سازی همه‌ی دانش‌آموزها؛ اکسل سال جدید برگشتی‌ها را فعال می‌کند
+            students.update(is_active=False)
+
+            # پاک‌سازی داده‌ی تحصیلی سال (CASCADE: ExamScore/AssignmentScore/ClassroomPresence)
+            Exam.objects.all().delete()
+            Assignment.objects.all().delete()
+            Classroom.objects.all().delete()
+            # سه مدل Average با اولین اکسل سال جدید دوباره ساخته می‌شوند
+            ExamAverage.objects.all().delete()
+            AssignmentAverage.objects.all().delete()
+            ClassroomAverage.objects.all().delete()
+            Group.objects.all().delete()
+
+        logger.info(f"{request.user.username} archived study_year={study_year}: {archived} students")
+        return Response(
+            {"message": "Year archived successfully", "study_year": study_year, "students_archived": archived},
+            status=status.HTTP_200_OK
+        )
+
+# @api_view(['GET'])
+# @permission_classes([IsAdminUser])
+# def zappier(request):
+#     scripts.temporaryscript()
+#     return Response({"message": "Run Successfully"}, status=status.HTTP_200_OK)    
+
+# @api_view(['GET'])
+# @permission_classes([IsAdminUser])
+# def zappier1(request):
+#     scripts.cfas()
+#     return Response({"message": "Run Successfully"}, status=status.HTTP_200_OK)    
 
 
 
@@ -98,7 +219,7 @@ class GroupsIndex (viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
         
-    @action(detail=True, methods=['get'] , permission_classes=[AllowAny])
+    @action(detail=True, methods=['get'], permission_classes=[IsAdminUser])
     def export_exam_scores(self, request, pk):
         group_id = pk
         group = Group.objects.get(id=group_id)
@@ -132,7 +253,7 @@ class GroupsIndex (viewsets.ModelViewSet):
         wb.save(response)
         return response    
         
-    @action(detail=True, methods=['get'], permission_classes=[AllowAny])
+    @action(detail=True, methods=['get'], permission_classes=[IsAdminUser])
     def export_assignment_scores(self, request, pk):
         group_id = pk
         # group = Group.objects.get(id=group_id)
@@ -176,6 +297,21 @@ class UsersIndex (viewsets.ModelViewSet):
     http_method_names = ['get','post','delete','patch']
     permission_classes = [IsAdminUser,IsAuthenticated]
     search_fields=('first_name','last_name','username','groups__name','studentuser__student_type','groups__group_grade','groups__group_gender','studentuser__student_school','studentuser__mother_number','studentuser__registration_date')
+
+    def get_queryset(self):
+        # رفع N+1: برای detail سریالایزر تودرتوی سنگین prefetch می‌شود، برای list سبک‌تر
+        qs = User.objects.filter(is_staff=False).order_by('-date_joined')
+        if self.action == 'retrieve':
+            qs = qs.select_related('studentuser', 'examaverage', 'assignmentaverage').prefetch_related(
+                'groups',
+                'examaverage__examscore_set__exam',
+                'assignmentaverage__assignmentscore_set__assignment',
+                'directmoney_set', 'signedcheck_set',
+            )
+        elif self.action == 'list':
+            qs = qs.select_related('studentuser').prefetch_related('groups')
+        return qs
+
     # def list(self, request):
     #     ordering = request.query_params.get('ordering', '-date_joined')
     #     queryset = User.objects.filter(is_staff=False).order_by(ordering)
@@ -279,7 +415,7 @@ class UsersIndex (viewsets.ModelViewSet):
                     exam_avg.get_average()
             return Response(status=status.HTTP_202_ACCEPTED)
 
-    @action(detail=True, methods=['get'], permission_classes=[AllowAny])
+    @action(detail=True, methods=['get'], permission_classes=[IsAdminUser])
     def classroom_presence_summary(self, request, pk=None):
         user = self.get_object()
     
@@ -312,9 +448,31 @@ class UsersIndex (viewsets.ModelViewSet):
         response['Content-Disposition'] = f'attachment; filename={filename}'
         return response
 
+    @action(detail=True, methods=['get'], permission_classes=[IsAdminUser])
+    def year_records(self, request, pk=None):
+        """آرشیو سال‌به‌سال دانش‌آموز (برای نمودار بالای پروفایل)."""
+        user = self.get_object()
+        records = user.year_records.all().prefetch_related('exam_records', 'assignment_records')
+        return Response(StudentYearRecordSerializer(records, many=True).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], permission_classes=[IsAdminUser], url_path='attendance')
+    def attendance(self, request, pk=None):
+        """تاریخچه‌ی حضور و غیابِ حضوریِ دانش‌آموز + خلاصه."""
+        user = self.get_object()
+        records = user.attendance_records.all()
+        total = records.count()
+        absent = records.filter(present=False).count()
+        return Response({
+            'total_sessions': total,
+            'present_count': total - absent,
+            'absent_count': absent,
+            'records': AttendanceRecordSerializer(records, many=True).data,
+        }, status=status.HTTP_200_OK)
+
 class NotificationViewSet(viewsets.ModelViewSet):
     queryset = Notification.objects.all()
     serializer_class = NotificationSerializer
+    permission_classes = [IsAdminUser, IsAuthenticated]
     http_method_names = ['get','post','delete','patch']
     def perform_create(self, serializer):
         notif = serializer.save()
@@ -325,11 +483,15 @@ class NotificationViewSet(viewsets.ModelViewSet):
                 [UserNotification(user_id=u, notification=notif) for u in users]
             )
 
-    @action(detail=True, methods=["get"], url_path="user")
-    def user_notifications(self, request,pk=None):
+    @action(detail=True, methods=["get"], url_path="user", permission_classes=[IsAuthenticated])
+    def user_notifications(self, request, pk=None):
         username = pk
         if not username:
             return Response({"error": "username required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # کاربر عادی فقط نوتیف خودش را می‌بیند؛ فقط ادمین/استاف می‌تواند نوتیف دیگران را بخواند
+        if not request.user.is_staff and username != request.user.username:
+            return Response({"message": "You are not allowed"}, status=status.HTTP_403_FORBIDDEN)
 
         # نوتیف دائم گروه‌های کاربر
         persistent = Notification.objects.filter(
@@ -340,9 +502,14 @@ class NotificationViewSet(viewsets.ModelViewSet):
         one_time = UserNotification.objects.filter(user__username=username).select_related("notification")
         return Response(list(persistent) + UserNotificationSerializer(one_time, many=True).data , status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=["delete"], url_path="read")
+    @action(detail=True, methods=["delete"], url_path="read", permission_classes=[IsAuthenticated])
     def mark_as_read(self, request, pk=None):
         user_notif = get_object_or_404(UserNotification.objects.select_related("notification"), pk=pk)
+
+        # کاربر عادی فقط می‌تواند نوتیف متعلق به خودش را ببندد
+        if not request.user.is_staff and user_notif.user_id != request.user.id:
+            return Response({"message": "You are not allowed"}, status=status.HTTP_403_FORBIDDEN)
+
         notif = user_notif.notification
         user_notif.delete()
         if not notif.user_notifications.exists():
@@ -350,76 +517,39 @@ class NotificationViewSet(viewsets.ModelViewSet):
             notif.save(update_fields=["is_finished"])
         return Response({"status": "Read And Removed"},status=status.HTTP_200_OK)
 
+@extend_schema_view(
+    custom=extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT),
+)
 class SMSManagerIndex(viewsets.ViewSet):
     permission_classes = [IsAdminUser, IsAuthenticated]
-    # ✅ ارسال پیامک به یک فرد (پدر یا مادر)
-    
-    @action(detail=True, methods=['post'], url_path='individual')
-    def send_individual(self, request, pk=None):
-        recipient_type = request.data.get('recipient')  # 'father' یا 'mother'
-        message_text = request.data.get('message')
+    # محدودیت نرخ اختصاصی (اسکوپ 'sms') چون ارسال پیامک هزینه‌ی مالی دارد
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'sms'
 
-        if recipient_type not in ['father', 'mother']:
-            return Response({"error": "recipient must be 'father' or 'mother'"}, status=status.HTTP_400_BAD_REQUEST)
-        if not message_text:
+    @action(detail=False, methods=['post'], url_path='custom')
+    def custom(self, request):
+        """ارسال پیام دلخواه به یک/چند گروه و/یا یک/چند فرد.
+        body: {"group_ids":[...], "user_ids":[...], "message":"...", "target":"mother"|"father"|"both"}
+        (مقصد پیش‌فرضِ دانش‌آموز را تغییر نمی‌دهد)"""
+        logger = logging.getLogger('sms_manager')
+        group_ids = request.data.get('group_ids') or []
+        user_ids = request.data.get('user_ids') or []
+        message = (request.data.get('message') or '').strip()
+        target = (request.data.get('target') or 'mother').strip()
+
+        if not message:
             return Response({"error": "message is required"}, status=status.HTTP_400_BAD_REQUEST)
-
-        student = get_object_or_404(StudentUser, pk=pk)
-        mobile = student.father_number if recipient_type == 'father' else student.mother_number
-
-        if not mobile:
-            return Response({"error": f"{recipient_type} number not available"}, status=status.HTTP_400_BAD_REQUEST)
+        if not group_ids and not user_ids:
+            return Response({"error": "at least one of group_ids or user_ids is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            result = sms_ir.send_sms(mobile, message_text, LINE_NUMBER)
-
-            # ✅ ثبت در لاگ
-            logger.info(f"Individual SMS sent | StudentID={pk} | Recipient={recipient_type} | Mobile={mobile} | Message='{message_text}' | Status={result}")
-
-            return Response({"status": "sent", "response": result})
+            result = sms_manager.send_custom(group_ids, user_ids, message, target)
+            logger.info(f"Custom SMS by {request.user.username} | groups={group_ids} users={user_ids} target={target} | {result}")
+            return Response(result, status=status.HTTP_200_OK)
         except Exception as e:
-            logger.error(f"Individual SMS error | StudentID={pk} | Error={str(e)}")
+            logger.error(f"Custom SMS error by {request.user.username}: {e}")
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # ✅ ارسال گروهی (پیش‌فرض مادر، اگر نبود پدر)
-    @action(detail=False, methods=['post'], url_path='group')
-    def send_group(self, request):
-        group_ids = request.data.get('group_ids')
-        message_text = request.data.get('message')
-
-        if not group_ids or not isinstance(group_ids, list):
-            return Response({"error": "group_ids (list) is required"}, status=status.HTTP_400_BAD_REQUEST)
-        if not message_text:
-            return Response({"error": "message is required"}, status=status.HTTP_400_BAD_REQUEST)
-
-        mobiles = set()
-        group_names = []
-
-        for group_id in group_ids:
-            group = Group.objects.filter(pk=group_id).first()
-            if group:
-                group_names.append(group.name)
-                students = StudentUser.objects.filter(student_user__groups=group)
-                for student in students:
-                    if student.mother_number:
-                        mobiles.add(student.mother_number)
-                    elif student.father_number:
-                        mobiles.add(student.father_number)
-
-        if not mobiles:
-            return Response({"error": "No valid numbers found"}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            result = sms_ir.send_bulk_sms(list(mobiles), message_text, LINE_NUMBER)
-
-            # ✅ ثبت در لاگ
-            logger.info(f"Group SMS sent | Groups={group_names} | TotalNumbers={len(mobiles)} | Message='{message_text}' | Status={result}")
-
-            return Response({"status": "sent", "total": len(mobiles), "response": result})
-        except Exception as e:
-            logger.error(f"Group SMS error | Groups={group_names} | Error={str(e)}")
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
 #########################   CLASSROOM All Upload Set
 class ClassroomsIndex (viewsets.ModelViewSet):
     queryset = Classroom.objects.all().order_by('-classroom_creation_time')
@@ -519,16 +649,6 @@ class AssignmentsIndex (viewsets.ModelViewSet):
                 if timezone.is_naive(new_end_dt):
                     new_end_dt = timezone.make_aware(new_end_dt, timezone.get_current_timezone())
 
-                # current_end = instance.assignment_available_time_end
-                # if timezone.is_naive(current_end):
-                #     current_end = timezone.make_aware(current_end, timezone.get_current_timezone())
-
-                # print("current_end:", current_end)
-                print("new_end_dt :", new_end_dt)
-                print("now        :", now)
-                # print("current_end < now:", current_end < now)
-                print("new_end > current_end:", new_end_dt > now)
-
                 # 3) فقط اگر ددلاین قبلی گذشته و جدید جلوتره، ریست کن
                 if new_end_dt > now:
                     reset_triggered = True
@@ -558,25 +678,25 @@ class AssignmentsIndex (viewsets.ModelViewSet):
         logger.info(f"{request.user.username} Changed Assignment {instance.assignment_id}")
         return response
     
-    @action(detail=True, methods=['get'], permission_classes=[IsAdminUser])
-    def send_all_results_sms(self, request, pk=None):
-        try:
-            # دریافت تکلیف
-            assignment = get_object_or_404(Assignment, assignment_id=pk)
+    @action(detail=True, methods=['get'], permission_classes=[IsAdminUser], url_path='sms-recipients')
+    def sms_recipients(self, request, pk=None):
+        """لیست افراد این تکلیف برای انتخاب در فرانت (نام، نمره، داشتنِ شماره‌ی مادر/پدر)."""
+        assignment = get_object_or_404(Assignment, assignment_id=pk)
+        return Response(sms_manager.assignment_recipients(assignment), status=status.HTTP_200_OK)
 
-            # ارسال پیامک نتایج
-            send_sms(assignment)
-
-            return Response(
-                {"message": "SMS sent successfully."},
-                status=status.HTTP_200_OK
-            )
-
-        except Exception as e:
-            return Response(
-                {"message": f"An error occurred: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+    @extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT)
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminUser], url_path='send-sms')
+    def send_sms(self, request, pk=None):
+        """ارسال پیامک نمره‌ی این تکلیف.
+        body: {"user_ids": [...] یا "all", "target": "mother"|"father"|"both"}"""
+        assignment = get_object_or_404(Assignment, assignment_id=pk)
+        if not assignment.sms_permission:
+            return Response({"error": "هنوز مجوز ارسال پیامک برای این تکلیف صادر نشده (همه تصحیح نشده‌اند)."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        target = (request.data.get('target') or 'mother').strip()
+        user_ids = request.data.get('user_ids', 'all')
+        result = sms_manager.send_assignment_scores(assignment, user_ids, target)
+        return Response(result, status=status.HTTP_200_OK)
      
 class AssignmentScoresIndex (viewsets.ModelViewSet):
     queryset = AssignmentScore.objects.filter(assignment_presence=True).order_by('-updated_file_at')
@@ -617,28 +737,10 @@ class AssignmentScoresIndex (viewsets.ModelViewSet):
         response = super().partial_update(request, *args, **kwargs)
         instance.refresh_from_db()
         instance.get_score()
-        logger.info(f"Assignment {instance.pk} Marked By:{request.user.username}")    
+        # اگر همه‌ی نمرات این تکلیف تصحیح شدند، مجوز ارسال پیامک صادر می‌شود
+        instance.assignment.update_sms_permission()
+        logger.info(f"Assignment {instance.pk} Marked By:{request.user.username}")
         return response
-    
-    @action(detail=True, methods=['get'], permission_classes=[IsAdminUser])
-    def send_result_sms(self, request, pk=None):
-        try:
-            # دریافت تکلیف
-            assignment = get_object_or_404(Assignment, assignment_id=pk)
-
-            # ارسال پیامک نتایج
-            send_sms(assignment)
-
-            return Response(
-                {"message": "SMS sent successfully."},
-                status=status.HTTP_200_OK
-            )
-
-        except Exception as e:
-            return Response(
-                {"message": f"An error occurred: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )  
     
     # @swagger_auto_schema(auto_schema=None)
     @action(detail=True,methods=['patch'],permission_classes=[IsAdminUser],parser_classes=[parsers.MultiPartParser, parsers.FormParser])
@@ -785,26 +887,26 @@ class ExamsIndex (viewsets.ModelViewSet):
         # instance.finish_exam()
         return response
     
-    @action(detail=True, methods=['get'], permission_classes=[IsAdminUser])
-    def send_all_results_sms(self, request, pk=None):
-        try:
-            # دریافت تکلیف
-            exam = get_object_or_404(Exam, exam_id=pk)
+    @action(detail=True, methods=['get'], permission_classes=[IsAdminUser], url_path='sms-recipients')
+    def sms_recipients(self, request, pk=None):
+        """لیست افراد این آزمون برای انتخاب در فرانت (نام، نمره، داشتنِ شماره‌ی مادر/پدر)."""
+        exam = get_object_or_404(Exam, exam_id=pk)
+        return Response(sms_manager.exam_recipients(exam), status=status.HTTP_200_OK)
 
-            # ارسال پیامک نتایج
-            send_sms(exam)
+    @extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT)
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminUser], url_path='send-sms')
+    def send_sms(self, request, pk=None):
+        """ارسال پیامک نمره‌ی این آزمون (شامل آزمون حضوری/آفلاین).
+        body: {"user_ids": [...] یا "all", "target": "mother"|"father"|"both"}"""
+        exam = get_object_or_404(Exam, exam_id=pk)
+        if not exam.sms_permission:
+            return Response({"error": "هنوز مجوز ارسال پیامک برای این آزمون صادر نشده."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        target = (request.data.get('target') or 'mother').strip()
+        user_ids = request.data.get('user_ids', 'all')
+        result = sms_manager.send_exam_scores(exam, user_ids, target)
+        return Response(result, status=status.HTTP_200_OK)
 
-            return Response(
-                {"message": "SMS sent successfully."},
-                status=status.HTTP_200_OK
-            )
-
-        except Exception as e:
-            return Response(
-                {"message": f"An error occurred: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-        
 class ExamScoresIndex (viewsets.ModelViewSet):
     # queryset = ExamScore.objects.all()
     serializer_class = ExamScoresSerializer
@@ -829,27 +931,12 @@ class ExamScoresIndex (viewsets.ModelViewSet):
         # serializer = self.get_serializer(exam_scores, many=True)
         serializer = ExamScoresSerializerWithExamName(exam_scores, many=True)
         return Response(serializer.data)
-    
-    @action(detail=True, methods=['get'], permission_classes=[IsAdminUser])
-    def send_result_sms(self, request, pk=None):
-        try:
-            # دریافت تکلیف
-            exam = get_object_or_404(Exam, exam_id=pk)
-
-            # ارسال پیامک نتایج
-            send_sms(exam)
-
-            return Response(
-                {"message": "SMS sent successfully."},
-                status=status.HTTP_200_OK
-            )
-
-        except Exception as e:
-            return Response(
-                {"message": f"An error occurred: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
         
+@extend_schema_view(
+    retrieve=extend_schema(parameters=[OpenApiParameter('id', OpenApiTypes.UUID, OpenApiParameter.PATH)]),
+    partial_update=extend_schema(parameters=[OpenApiParameter('id', OpenApiTypes.UUID, OpenApiParameter.PATH)]),
+    destroy=extend_schema(parameters=[OpenApiParameter('id', OpenApiTypes.UUID, OpenApiParameter.PATH)]),
+)
 class QuestionsIndex(viewsets.ModelViewSet):
     serializer_class = QuestionSerializer
     http_method_names = ['get', 'post', 'delete', 'patch']
@@ -921,6 +1008,7 @@ class DirectMoneyIndex (viewsets.ModelViewSet):
 ############################# Uploads
   
 ###########Upload working stable version
+@extend_schema_view(post=extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT))
 class UploadExcelView(views.APIView):
     http_method_names = ['post']
     permission_classes = [IsAdminUser, IsAuthenticated]
@@ -936,6 +1024,11 @@ class UploadExcelView(views.APIView):
         })
 
         is_admin_file = 'admin' in data.columns and str(data.loc[0, 'admin']).strip() == 'ntorabi'
+
+        # ساخت اکانت staff فقط توسط superuser مجاز است (جلوگیری از ارتقای دسترسی)
+        if is_admin_file and not request.user.is_superuser:
+            return Response({"error": "Only a superuser can upload an admin (staff-creating) file"},
+                            status=status.HTTP_403_FORBIDDEN)
 
         field_mapping = {
             'father_name': 'نام پدر',
@@ -986,6 +1079,8 @@ class UploadExcelView(views.APIView):
                 user.set_password(password)
             user.first_name = row.get('نام', "")
             user.last_name = row.get('نام خانوادگی', "")
+            # دانش‌آموزِ حاضر در اکسلِ سال جدید فعال می‌شود (برگشتی‌ها بعد از بایگانی دوباره فعال)
+            user.is_active = True
             user.save()
 
             group_name = row['گروه']
@@ -1056,6 +1151,159 @@ class UploadExcelView(views.APIView):
                     )
 
         return Response(status=status.HTTP_201_CREATED)
+
+
+# ───────────────── همگام‌سازی اکسلِ امتحان حضوری و حضور و غیاب ─────────────────
+def _parse_jalali_date(s):
+    """'1403/07/15' → datetime آگاه از تایم‌زون (نیمه‌شب تهران)؛ None اگر نامعتبر."""
+    try:
+        y, m, d = map(int, str(s).strip().split("/"))
+        g = jdatetime.date(y, m, d).togregorian()
+        dt = datetime(g.year, g.month, g.day)
+        if timezone.is_naive(dt):
+            dt = timezone.make_aware(dt, timezone.get_current_timezone())
+        return dt
+    except Exception:
+        return None
+
+
+def _is_absent_value(v):
+    """تفسیر مقدار وضعیت/حاضر در اکسل → True یعنی غایب."""
+    return str(v).strip() in ('غایب', 'absent', 'Absent', '0', 'false', 'False', 'خیر')
+
+
+@extend_schema_view(post=extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT))
+class UploadOfflineExamView(views.APIView):
+    """
+    آپلود نتایج یک امتحان حضوری (آفلاین).
+    فیلدهای فرم: exam_name، group (نام گروه)، date ('1403/07/15')، headline (اختیاری)
+    ستون‌های اکسل: 'کد ملی' + 'درصد'  (+ اختیاری 'حاضر')
+    یک Exam سبک می‌سازد و برای هر دانش‌آموز ExamScoreOffline ثبت می‌کند که در میانگین امتحانات لحاظ می‌شود.
+    اجرای مجدد با همان exam_name+group، نمرات قبلی همان امتحان را بازنویسی می‌کند (idempotent).
+    """
+    parser_classes = (parsers.MultiPartParser, parsers.FormParser)
+    permission_classes = [IsAdminUser, IsAuthenticated]
+
+    def post(self, request):
+        logger = logging.getLogger('management_logger')
+        file       = request.FILES.get('file')
+        exam_name  = (request.data.get('exam_name') or '').strip()
+        group_name = (request.data.get('group') or '').strip()
+        headline   = (request.data.get('headline') or '').strip()
+        date_dt    = _parse_jalali_date(request.data.get('date'))
+
+        if not file or not exam_name or not group_name:
+            return Response({"error": "file, exam_name و group لازم‌اند"}, status=status.HTTP_400_BAD_REQUEST)
+
+        group = Group.objects.filter(name=group_name).first()
+        if not group:
+            return Response({"error": f"گروه '{group_name}' یافت نشد"}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            data = pd.read_excel(file, dtype={'کد ملی': str})
+        except Exception as e:
+            return Response({"error": f"خطا در خواندن اکسل: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+        if 'کد ملی' not in data.columns or 'درصد' not in data.columns:
+            return Response({"error": "ستون‌های 'کد ملی' و 'درصد' لازم‌اند"}, status=status.HTTP_400_BAD_REQUEST)
+
+        skipped, applied, affected = [], 0, set()
+        with transaction.atomic():
+            exam, _ = Exam.objects.get_or_create(
+                ExamName=exam_name, exam_group=group,
+                defaults=dict(exam_headline=(headline or exam_name), exam_finished=True, exam_permission=False),
+            )
+            if date_dt:
+                exam.exam_available_time_start = date_dt
+                exam.exam_available_time_end = date_dt
+            exam.exam_headline = headline or exam.exam_headline
+            exam.exam_finished = True
+            exam.exam_permission = False
+            exam.sms_permission = True   # امتحان حضوری ثبت شد → مجوز ارسال پیامک
+            exam.save()
+            ExamScoreOffline.objects.filter(exam=exam).delete()  # بازنویسی روی اجرای مجدد
+
+            for _, row in data.iterrows():
+                if pd.isna(row.get('کد ملی')):
+                    continue
+                username = str(row['کد ملی']).strip()
+                user = User.objects.filter(username=username).first()
+                if not user:
+                    skipped.append(username); continue
+                exam_avg, _ = ExamAverage.objects.get_or_create(user=user)
+                present = not ('حاضر' in row and not pd.isna(row['حاضر']) and _is_absent_value(row['حاضر']))
+                try:
+                    score = round(float(row['درصد']), 2) if present and not pd.isna(row.get('درصد')) else 0
+                except Exception:
+                    score = 0
+                ExamScoreOffline.objects.create(
+                    exam=exam, exam_average_reffer=exam_avg,
+                    score=score, exam_peresence=present, countable=True,
+                )
+                affected.add(exam_avg.id); applied += 1
+
+            for avg in ExamAverage.objects.filter(id__in=affected):
+                avg.get_average()
+
+        logger.info(f"{request.user.username} offline-exam '{exam_name}' group={group_name}: {applied} scores, {len(skipped)} skipped")
+        return Response({"message": "نتایج امتحان حضوری ثبت شد", "exam_id": str(exam.exam_id),
+                         "applied": applied, "skipped": skipped}, status=status.HTTP_200_OK)
+
+
+@extend_schema_view(post=extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT))
+class UploadAttendanceView(views.APIView):
+    """
+    آپلود حضور و غیاب یک جلسه‌ی حضوری.
+    فیلدهای فرم: group (نام گروه)، date ('1403/07/15')، session_title
+    ستون‌های اکسل: 'کد ملی'  (+ اختیاری 'وضعیت' = حاضر/غایب؛ پیش‌فرض حاضر)
+    برای هر دانش‌آموز یک AttendanceRecord می‌سازد و شمارنده‌ی غیبت (ClassroomAverage) را از روی رکوردها بازمحاسبه می‌کند.
+    اجرای مجدد همان جلسه (تاریخ+موضوع) به‌جای تکرار، رکورد را به‌روزرسانی می‌کند (idempotent).
+    """
+    parser_classes = (parsers.MultiPartParser, parsers.FormParser)
+    permission_classes = [IsAdminUser, IsAuthenticated]
+
+    def post(self, request):
+        logger = logging.getLogger('management_logger')
+        file          = request.FILES.get('file')
+        group_name    = (request.data.get('group') or '').strip()
+        session_title = (request.data.get('session_title') or '').strip()
+        date_dt       = _parse_jalali_date(request.data.get('date'))
+
+        if not file or not session_title or date_dt is None:
+            return Response({"error": "file, session_title و date ('1403/07/15') لازم‌اند"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            data = pd.read_excel(file, dtype={'کد ملی': str})
+        except Exception as e:
+            return Response({"error": f"خطا در خواندن اکسل: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+        if 'کد ملی' not in data.columns:
+            return Response({"error": "ستون 'کد ملی' لازم است"}, status=status.HTTP_400_BAD_REQUEST)
+
+        session_date = date_dt.date()
+        skipped, applied, affected = [], 0, set()
+        with transaction.atomic():
+            for _, row in data.iterrows():
+                if pd.isna(row.get('کد ملی')):
+                    continue
+                username = str(row['کد ملی']).strip()
+                user = User.objects.filter(username=username).first()
+                if not user:
+                    skipped.append(username); continue
+                present = not ('وضعیت' in row and not pd.isna(row['وضعیت']) and _is_absent_value(row['وضعیت']))
+                AttendanceRecord.objects.update_or_create(
+                    student=user, date=session_date, session_title=session_title,
+                    defaults=dict(group_name=(group_name or None), present=present),
+                )
+                affected.add(user.id); applied += 1
+
+            # شمارنده‌ی غیبت را از روی رکوردها بازمحاسبه کن (idempotent)
+            for user in User.objects.filter(id__in=affected):
+                class_avg, _ = ClassroomAverage.objects.get_or_create(user=user)
+                class_avg.absence_count = AttendanceRecord.objects.filter(student=user, present=False).count()
+                class_avg.save(update_fields=['absence_count'])
+
+        logger.info(f"{request.user.username} attendance '{session_title}' {session_date} group={group_name}: {applied} rows, {len(skipped)} skipped")
+        return Response({"message": "حضور و غیاب ثبت شد", "session_title": session_title,
+                         "applied": applied, "skipped": skipped}, status=status.HTTP_200_OK)
     
     
     

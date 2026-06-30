@@ -24,9 +24,14 @@ router.register(r'smsmanager', views.SMSManagerIndex, basename='smsmanager')
 app_name='ManagementApp'
 urlpatterns = [
     path('upload-excel/', views.UploadExcelView.as_view(), name='upload-excel'),
+    path('upload-offline-exam/', views.UploadOfflineExamView.as_view(), name='upload-offline-exam'),
+    path('upload-attendance/', views.UploadAttendanceView.as_view(), name='upload-attendance'),
+    path('archive-year/', views.ArchiveYearView.as_view(), name='archive-year'),
     path('change-password/', views.change_user_password, name='change-password'),
-    path('zappier/', views.zappier, name='zappier'),
-    path('zappier1/', views.zappier1, name='zappier1'),
+    # zappier/zappier1 غیرفعال‌اند (ویوهایشان حذف شده؛ ارجاع به آن‌ها check را می‌شکست).
+    # در صورت نیاز، آن‌ها را به management command تبدیل کنید نه endpoint.
+    # path('zappier/', views.zappier, name='zappier'),
+    # path('zappier1/', views.zappier1, name='zappier1'),
     # path('kick-all/', views.invalidate_authenticated_users, name='kick-logged-users'),
     
 ]

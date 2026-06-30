@@ -15,7 +15,10 @@ class ExamAdmin(admin.ModelAdmin):
         }),
         ('تنظیمات آزمون', {
             'fields': (('exam_permission', 'exam_running', 'exam_finished'), ('student_returns', 'exam_extra_score'))
-        })
+        }),
+        ('پیامک', {
+            'fields': (('sms_permission', 'sms_sent', 'sms_sent_at'),)
+        }),
     )
 
 @admin.register(models.Question)
@@ -34,7 +37,7 @@ class ExamScoreAdmin(admin.ModelAdmin):
             'fields': (('exam', 'exam_average_reffer'), ('score',),)
         }),
         ('تنظیمات نمره آزمون', {
-            'fields': (('exam_permission', 'exam_peresence', 'exam_finished'), ('student_available_extra_time_end', 'student_extra_score'), ('connect_times', 'active_question_number'), ('questions_list', 'questions_answer_list','user_choice',), ('last_question_time',), ('returns_count',), ('wrong_counts','none_counts',),)
+            'fields': (('exam_permission', 'exam_peresence', 'exam_finished'), ('student_available_extra_time_end', 'student_extra_score'), ('connect_times', 'active_question_number', 'max_question_number'), ('questions_list', 'questions_answer_list','user_choice',), ('active_deadline', 'frontier_remaining'), ('returns_count',), ('wrong_counts','none_counts',),)
         })
     )
 

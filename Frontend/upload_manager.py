@@ -8,7 +8,6 @@ from uuid import uuid4
 from django.conf import settings
 from PIL import Image
 from django.utils.text import slugify
-import asyncio
 
 upload_logger = logging.getLogger("upload_manager")
 upload_logger.info("Upload log started")
@@ -37,17 +36,21 @@ TEMP_DIR = settings.TEMP_UPLOAD_DIR
 #     return None
 
 def connect_ftps():
+    """اتصال رمزنگاری‌شده FTPS (TLS). کانال داده هم با prot_p رمزنگاری می‌شود.
+    نکته: سرور FTP باید از TLS پشتیبانی کند؛ در غیر این صورت اتصال برقرار نمی‌شود."""
     try:
-        ftp = FTP()
-        ftp.connect(settings.FTPS_HOST, settings.FTPS_PORT, timeout=15)
-        ftp.login(settings.FTPS_USER, settings.FTPS_PASSWORD)
-        return ftp
+        ftps = FTP_TLS()
+        ftps.connect(settings.FTPS_HOST, settings.FTPS_PORT, timeout=15)
+        ftps.auth()        # شروع TLS روی کانال کنترل
+        ftps.login(settings.FTPS_USER, settings.FTPS_PASSWORD)
+        ftps.prot_p()      # رمزنگاری کانال داده
+        return ftps
     except error_perm as e:
-        upload_logger.error(f"Permission error during FTP connection: {e}")
+        upload_logger.error(f"Permission error during FTPS connection: {e}")
     except TimeoutError as e:
-        upload_logger.error(f"FTP Connection timed out: {e}")
+        upload_logger.error(f"FTPS Connection timed out: {e}")
     except Exception as e:
-        upload_logger.error(f"Unexpected FTP error: {e}", exc_info=True)
+        upload_logger.error(f"Unexpected FTPS error: {e}", exc_info=True)
     return None
 # ---------------------------
 # اعتبارسنجی فایل‌ها
@@ -69,85 +72,17 @@ def validate_file(file_obj, ext):
         return False
 
 # ---------------------------
-# آپلود مستقیم به FTPS
+# آپلود همگام با Retry
+# (قبلاً async + asyncio.run بود که زیر یک event loop فعال خطا می‌داد؛
+#  چون از مسیر همگام درخواست صدا زده می‌شود، تابع همگام درست‌تر و پایدارتر است)
 # ---------------------------
-# def upload_to_ftps(file_obj, remote_dir, remote_filename):
-#     ext = file_obj.name.split('.')[-1].lower()
-#     if not validate_file(file_obj, ext):
-#         raise Exception("Invalid or corrupted file uploaded.")
+def upload_to_ftps(file_obj, remote_dir, remote_filename, retries=3):
 
-#     # ذخیره موقت
-#     os.makedirs(TEMP_DIR, exist_ok=True)
-#     temp_file_path = os.path.join(TEMP_DIR, f"{uuid4()}.{ext}")
-#     with open(temp_file_path, "wb") as temp_file:
-#         for chunk in file_obj.chunks():
-#             temp_file.write(chunk)
-
-#     try:
-#         ftps = connect_ftps()
-#         # ساخت پوشه‌های لازم
-#         dirs = remote_dir.strip("/").split("/")
-#         current_dir = ""
-#         for d in dirs:
-#             current_dir += "/" + d
-#             try:
-#                 ftps.cwd(current_dir)
-#             except Exception:
-#                 ftps.mkd(current_dir)
-#                 ftps.cwd(current_dir)
-
-#         # حذف فایل قبلی اگر وجود داشت
-#         try:
-#             ftps.delete(remote_filename)
-#             upload_logger.info(f">>>> Start Upload - Old file removed: {remote_filename}")
-#         except Exception:
-#             upload_logger.info(f">>>> Start Upload - No old file found to remove: {remote_filename}")
-
-#         # آپلود
-#         upload_logger.info(f"Uploading file: {remote_filename}")
-#         with open(temp_file_path, "rb") as f:
-#             ftps.storbinary(f"STOR {remote_filename}", f)
-
-#         # اعتبارسنجی فایل روی سرور
-#         downloaded = io.BytesIO()
-#         ftps.retrbinary(f"RETR {remote_filename}", downloaded.write)
-#         downloaded.seek(0)
-#         try:
-#             if remote_filename.lower().endswith('.pdf'):
-#                 fitz.open(stream=downloaded.read(), filetype="pdf").close()
-#             else:
-#                 Image.open(io.BytesIO(downloaded.read())).verify()
-#             upload_logger.info(f"<<<<<<<<Verification passed for {remote_filename}")
-#         except Exception:
-#             ftps.delete(remote_filename)
-#             raise Exception("Uploaded file is corrupted and removed from FTPS")
-
-#         ftps.quit()
-
-#         # حذف فایل موقت
-#         if os.path.exists(temp_file_path):
-#             os.remove(temp_file_path)
-
-#         # ساخت URL نهایی
-#         return f"{settings.FTPS_BASE_URL}/{remote_dir}{remote_filename}"
-
-#     except Exception as e:
-#         upload_logger.error(f"Upload failed: {e}")
-#         if os.path.exists(temp_file_path):
-#             os.remove(temp_file_path)
-#         raise
-
-
-# ---------------------------
-# آپلود Async با Retry + Timeout
-# ---------------------------
-async def upload_to_ftps(file_obj, remote_dir, remote_filename, retries=3, timeout=30):
-    
     if "marked" in remote_filename:
         upload_logger = logging.getLogger("admins_manager")
     else:
         upload_logger = logging.getLogger("upload_manager")
-        
+
     upload_logger.info(f">>> Upload Started [{remote_filename}]")
     ext = file_obj.name.split('.')[-1].lower()
     if not validate_file(file_obj, ext):
@@ -160,20 +95,20 @@ async def upload_to_ftps(file_obj, remote_dir, remote_filename, retries=3, timeo
         for chunk in file_obj.chunks():
             temp_file.write(chunk)
 
-    for attempt in range(1, retries + 1):
-        try:
-            await asyncio.wait_for(asyncio.to_thread(_upload_file_sync, temp_file_path, remote_dir, remote_filename), timeout)
-            upload_logger.info(f"<<< Upload successful [{remote_filename}] on attempt {attempt}")
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-            return f"{settings.FTPS_BASE_URL}/{remote_dir}{remote_filename}"
-
-        except (asyncio.TimeoutError, Exception) as e:
-            upload_logger.error(f"Attempt {attempt} failed for {remote_filename}: {e}")
-            if attempt == retries:
-                if os.path.exists(temp_file_path):
-                    os.remove(temp_file_path)
-                raise Exception(f"Upload failed after {retries} retries.")
+    try:
+        for attempt in range(1, retries + 1):
+            try:
+                _upload_file_sync(temp_file_path, remote_dir, remote_filename)
+                upload_logger.info(f"<<< Upload successful [{remote_filename}] on attempt {attempt}")
+                return f"{settings.FTPS_BASE_URL}/{remote_dir}{remote_filename}"
+            except Exception as e:
+                upload_logger.error(f"Attempt {attempt} failed for {remote_filename}: {e}")
+                if attempt == retries:
+                    raise Exception(f"Upload failed after {retries} retries.")
+    finally:
+        # پاکسازی فایل موقت در هر حالت (موفق یا ناموفق)
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
 
 # ---------------------------
 # منطق Sync آپلود (برای اجرا در Thread)
@@ -317,13 +252,29 @@ def auto_upload(file_type, instance, file_obj=None, extra_data=None):
         remote_filename = f"{question_id}-Ans.{ext}"
         remote_created = f"Questions/{category_slug}/"
         baseurl = 'https://exams.arash-attar.com'
+        
+    elif file_type == "assignment_sms":
+        group_slug = slugify(instance.assignment_group.name, allow_unicode=True)
+        assignment_slug = slugify(instance.AssignmentName, allow_unicode=True)
+        assignment_id_slug = slugify(instance.assignment_id, allow_unicode=True)
+        remote_dir = f"Arash-Attar/Assignments/{group_slug}/{assignment_slug}/"
+        remote_filename = f"{assignment_id_slug}-Report.{ext}"      
+        remote_created = f"{group_slug}/{assignment_slug}/"
+        baseurl = 'https://assignments.arash-attar.com'  
+    
+    elif file_type == "exam_sms":
+        group_slug = slugify(instance.exam_group.name, allow_unicode=True)
+        exam_slug = slugify(instance.ExamName, allow_unicode=True)
+        remote_dir = f"Arash-Attar/Exams/Groups/{group_slug}/{exam_slug}/"
+        remote_filename = f"{exam_slug}-Report.{ext}"
+        remote_created = f"Groups/{group_slug}/{exam_slug}/"
+        baseurl = 'https://exams.arash-attar.com'    
+            
     else:
         raise ValueError("Invalid file_type")
 
-    # enqueue_upload(file_obj,remote_dir,remote_filename)
-    asyncio.run(upload_to_ftps(file_obj, remote_dir, remote_filename))
-    
-    # return f"{settings.FTPS_BASE_URL}/{remote_dir}{remote_filename}"
+    upload_to_ftps(file_obj, remote_dir, remote_filename)
+
     return f"{baseurl}/{remote_created}{remote_filename}"
 
 
@@ -355,7 +306,7 @@ def move_file_in_ftp(ftps, old_path, new_dir, filename):
         ftps.rename(old_path, new_path)
         return new_path
     except Exception as e:
-        print(f"Error moving file in FTP: {e}")
+        upload_logger.error(f"Error moving file in FTP: {e}")
         return None
 
 

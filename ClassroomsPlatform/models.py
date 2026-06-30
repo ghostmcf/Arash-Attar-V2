@@ -1,8 +1,7 @@
 from django.db import models
-from datetime import datetime
 from django.contrib.auth.models import User,Group
 from django.utils import timezone
-from uuid import uuid1
+from uuid import uuid4
 
 # Create your models here.
 class ClassroomStatus(models.TextChoices):
@@ -13,13 +12,13 @@ class ClassroomStatus(models.TextChoices):
 
 class Classroom (models.Model) :
     ClassroomName                           = models.CharField ("نام جلسه",max_length=150, blank= True , null = True,)
-    classroom_id                            = models.UUIDField("شماره شناسایی کلاس",primary_key=True,default=uuid1,help_text="شماره شناسایی کلاس به طور خودکار ساخته میشود و باید بی همتا باشد،لطفا تغییر ندهید")
+    classroom_id                            = models.UUIDField("شماره شناسایی کلاس",primary_key=True,default=uuid4,help_text="شماره شناسایی کلاس به طور خودکار ساخته میشود و باید بی همتا باشد،لطفا تغییر ندهید")
     classroom_headline                      = models.CharField ("موضوع جلسه",max_length=150, blank= True , null = True,)
-    classroom_creation_time                 = models.DateTimeField(auto_now_add=True)
-    classroom_available_time_start          = models.DateTimeField("زمان انتشار کلاس",default= datetime.now())
-    classroom_available_time_end            = models.DateTimeField("زمان پایان دسترسی ",default= datetime.now())
+    classroom_creation_time                 = models.DateTimeField(auto_now_add=True,db_index=True)
+    classroom_available_time_start          = models.DateTimeField("زمان انتشار کلاس",default= timezone.now)
+    classroom_available_time_end            = models.DateTimeField("زمان پایان دسترسی ",default= timezone.now)
     classroom_presence                      = models.BooleanField ("انجام حضور و غیاب",default=False)
-    classroom_status                        = models.CharField("وضعیت برگزاری کلاس",max_length=20,choices=ClassroomStatus.choices,default=ClassroomStatus.ACTIVE)
+    classroom_status                        = models.CharField("وضعیت برگزاری کلاس",max_length=20,choices=ClassroomStatus.choices,default=ClassroomStatus.ACTIVE,db_index=True)
     classroom_groups                        = models.ManyToManyField(Group)
     content1_url1                            = models.CharField ('کیفیت اول',max_length=250, blank= True , null = True)
     content1_url2                            = models.CharField ('کیفیت دوم',max_length=250, blank= True , null = True)
@@ -70,7 +69,6 @@ class Classroom (models.Model) :
                 # presence.make_present()  # فرض: این متد حضور را ثبت می‌کند
             # ذخیره فقط تغییرات لازم
             self.save(update_fields=['classroom_status',])
-            print("Classroom Ended")        
 
     def create_classroom_presence(self):
         classroom_presences = []
@@ -122,9 +120,8 @@ class Classroom (models.Model) :
         ClassroomPresence.objects.bulk_update(classroom_presences_update, ['classroom_presence','classroom_presence_percentage'])
 
     def __str__(self):
-        self.create_classroom_presence()
-        # self.finish_classroom() #remove later
-        return "  %s %s  " % (self.ClassroomName,self.classroom_headline,) 
+        # بدون عارضه‌ی جانبی؛ create_classroom_presence در ویوها صدا زده می‌شود
+        return "  %s %s  " % (self.ClassroomName,self.classroom_headline,)
 
 
 class ClassroomAverage (models.Model) :
@@ -137,7 +134,8 @@ class ClassroomAverage (models.Model) :
         return self.absence_count      
 
     def __str__(self) :
-        return "  %s %s    ,تعداد غیبت: %s" % (self.user.first_name,self.user.last_name,self.get_absence()) 
+        # از مقدار ذخیره‌شده استفاده می‌کنیم؛ get_absence() در __str__ باعث محاسبه و save می‌شد
+        return "  %s %s    ,تعداد غیبت: %s" % (self.user.first_name,self.user.last_name,self.absence_count)
 
 
 class ClassroomPresence (models.Model) :
@@ -148,6 +146,10 @@ class ClassroomPresence (models.Model) :
     classroom_permission            = models.BooleanField("مجوز برتر",default=True)
     classroom_presence_percentage   = models.DecimalField("میزان حضور در جلسه ",default=0,max_digits=5, decimal_places=2)
     classroom_presence              = models.JSONField("وضعیت حضور",default=dict)
+    # تا کجای هر ویدیو دیده شده: {"1": {"max_position": ثانیه, "duration": ثانیه, "percent": ...}, ...}
+    video_progress                  = models.JSONField("پیشرفت تماشای ویدیو",default=dict,blank=True)
+    # پیشرفت تماشای هر ویدیو: {"1": {"max_position": ثانیه, "duration": ثانیه, "percent": درصد}, ...}
+    video_progress                  = models.JSONField("پیشرفت ویدیوها",default=dict,blank=True)
     
     
     # def make_present(self):

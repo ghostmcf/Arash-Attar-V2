@@ -1,9 +1,8 @@
 from django.db import models
 from django.contrib.auth.models import User,Group
 import uuid
-from datetime import datetime,timedelta
+from datetime import timedelta
 from django.utils import timezone
-from datetime import datetime
 # Create your models here.
 from decimal import Decimal
 from django.utils.timezone import now
@@ -13,19 +12,30 @@ def default_assignment_end():
 
 class Assignment (models.Model) :
     assignment_group            = models.ForeignKey(Group,verbose_name="گروه",on_delete=models.CASCADE)
-    assignment_id               = models.UUIDField("شماره شناسایی تکلیف",primary_key=True,default=uuid.uuid1,help_text="شماره شناسایی تکلیف به طور خودکار ساخته میشود و باید بی همتا باشد،لطفا تغییر ندهید")
+    assignment_id               = models.UUIDField("شماره شناسایی تکلیف",primary_key=True,default=uuid.uuid4,help_text="شماره شناسایی تکلیف به طور خودکار ساخته میشود و باید بی همتا باشد،لطفا تغییر ندهید")
     AssignmentName              = models.CharField("نام تکلیف",max_length=100 , blank=True ,null=True)
     assignment_headline         = models.CharField("موضوع تکلیف",max_length=100 , blank=True ,null=True)   
     assignment_description      = models.TextField("توضیحات تکلیف",max_length=500,blank=True,null=True)    
-    assignment_creation_time            = models.DateTimeField("زمان ساخت تکلیف",auto_now_add=True)
+    assignment_creation_time            = models.DateTimeField("زمان ساخت تکلیف",auto_now_add=True,db_index=True)
     assignment_available_time_start = models.DateTimeField("زمان شروع تکلیف", default=now)
     assignment_available_time_end   = models.DateTimeField("زمان پایان تکلیف", default=default_assignment_end)
     assignment_finished                 = models.BooleanField("وضعیت  اتمام تکلیف",default=False)
     assignment_extra_score              = models.IntegerField("نمره اضافه",default=0)
     assignment_file                     = models.CharField("فایل تکلیف",max_length=500, blank=True ,null=True)
     assignment_answer_file              = models.CharField("فایل پاسخ تکلیف",max_length=500, blank=True ,null=True)
+    # پنل پیامک: مجوز ارسال (وقتی همه تصحیح شدند) و وضعیت ارسال
+    sms_permission                      = models.BooleanField("مجوز ارسال پیامک",default=False)
+    sms_sent                            = models.BooleanField("پیامک ارسال شده",default=False)
+    sms_sent_at                         = models.DateTimeField("زمان ارسال پیامک",blank=True,null=True)
 
-    
+    def update_sms_permission(self):
+        """اگر هیچ نمره‌ی تصحیح‌نشده‌ای نمانده باشد، مجوز ارسال پیامک صادر می‌شود."""
+        scores = self.assignmentscore_set
+        if scores.exists() and not scores.filter(assignment_marked=False).exists():
+            if not self.sms_permission:
+                self.sms_permission = True
+                self.save(update_fields=['sms_permission'])
+
     def finish_assignment(self):
         if self.assignment_available_time_end < timezone.now() and not self.assignment_finished:
             self.assignment_finished = True
@@ -110,9 +120,7 @@ class Assignment (models.Model) :
     
 
     def __str__(self):
-        # self.assignment_info()
-        self.create_assignment_score()
-        self.update_assignment_score()
+        # بدون عارضه‌ی جانبی؛ ساخت/به‌روزرسانی نمرات صراحتاً در ویوها صدا زده می‌شود
         return "%s Creation Time: %s" % (self.AssignmentName, self.assignment_creation_time.strftime("%c"))
     
 
@@ -142,7 +150,8 @@ class AssignmentAverage (models.Model) :
         return self.average
         
     def __str__(self) :
-        return "  %s %s    ,میانگین: %s" % (self.user.first_name,self.user.last_name,self.get_average()) 
+        # از میانگین ذخیره‌شده استفاده می‌کنیم تا __str__ باعث محاسبه و save نشود
+        return "  %s %s    ,میانگین: %s" % (self.user.first_name,self.user.last_name,self.average)
 
  
 class AssignmentScore (models.Model) :
@@ -156,7 +165,7 @@ class AssignmentScore (models.Model) :
     assignment_finished       = models.BooleanField("پایان تکلیف",default=False)
     assignment_marked         = models.BooleanField("وضعیت تصحیح تکلیف",default=False)
     assignment_marked_by      = models.CharField("مصحح",max_length=30 , blank=True ,null=True)
-    updated_file_at           = models.DateTimeField(auto_now_add=True)
+    updated_file_at           = models.DateTimeField(auto_now_add=True,db_index=True)
     extra_score               = models.DecimalField("درصد اضافه",max_digits=5, decimal_places=2, default=0.00)            
     q1_score        = models.DecimalField("نمره سوال 1", max_digits=4, decimal_places=2, blank=True, null=True, default=None)
     q2_score        = models.DecimalField("نمره سوال 2", max_digits=4, decimal_places=2, blank=True, null=True, default=None)
@@ -213,5 +222,5 @@ class AssignmentScore (models.Model) :
             self.assignment_average_reffer.get_average()
     
     def __str__(self) :
-        self.get_score()
-        return "  %s %s         , نمره:  %s ,       تکلیف:  %s" % (self.assignment_average_reffer.user.first_name,self.assignment_average_reffer.user.last_name,self.score,self.assignment.AssignmentName) 
+        # get_score() حذف شد تا نمایش رشته باعث محاسبه و ذخیره نشود
+        return "  %s %s         , نمره:  %s ,       تکلیف:  %s" % (self.assignment_average_reffer.user.first_name,self.assignment_average_reffer.user.last_name,self.score,self.assignment.AssignmentName)

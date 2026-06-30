@@ -3,20 +3,34 @@ from pathlib import Path
 
 import logging
 import jdatetime
-from datetime import datetime
+from datetime import datetime, timedelta
 from pytz import timezone as tz
+# from decouple import config
+from decouple import Config, RepositoryEnv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+default_env = BASE_DIR / ".env"
+server_env = Path.home() / ".env"
+
+if default_env.exists():
+    config = Config(RepositoryEnv(default_env))
+elif server_env.exists():
+    config = Config(RepositoryEnv(server_env))
+else:
+    raise FileNotFoundError(".env file not found")
+
+
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-(*x+aa&c41r1b28mgq3!ax6-)p!2r4-2ntu7a=%2^ez5tt+r+a'
+# از فایل .env خوانده می‌شود (در گیت نیست). نمونه: .env.example
+SECRET_KEY = config('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-# DEBUG = True
-DEBUG = False
+DEBUG = config('DEBUG', default=False, cast=bool)
 
-ALLOWED_HOSTS = ['*']
+# دامنه‌ی اصلی و همه‌ی ساب‌دامین‌ها (نقطه‌ی ابتدایی یعنی wildcard ساب‌دامین) + توسعه‌ی محلی
+ALLOWED_HOSTS = ['.arash-attar.com', 'localhost', '127.0.0.1']
 
 
 # Application definition
@@ -38,7 +52,9 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework.authtoken',
-    'corsheaders', 
+    'knox',
+    'axes',
+    'corsheaders',
     # 'drf_yasg',
     'drf_spectacular',
     'drf_spectacular_sidecar',
@@ -46,6 +62,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # CorsMiddleware باید تا حد امکان بالا و قبل از CommonMiddleware باشد
+    'corsheaders.middleware.CorsMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -53,8 +71,23 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'corsheaders.middleware.CorsMiddleware',  
+    # AxesMiddleware باید آخر باشد (بعد از AuthenticationMiddleware)
+    'axes.middleware.AxesMiddleware',
 ]
+
+# ضدِ brute-force (django-axes) — هم لاگین ادمین جنگو (/accounts/) هم لاگین API
+AUTHENTICATION_BACKENDS = [
+    'axes.backends.AxesStandaloneBackend',          # باید اول باشد
+    'django.contrib.auth.backends.ModelBackend',
+]
+AXES_FAILURE_LIMIT = 5                                # بعد از ۵ تلاش ناموفق
+AXES_COOLOFF_TIME = 1                                 # قفل به مدت ۱ ساعت
+AXES_RESET_ON_SUCCESS = True                          # ورود موفق شمارنده را صفر می‌کند
+# قفل بر اساس ترکیب (نام‌کاربری + IP) تا دانش‌آموزانِ پشتِ یک IP مشترک (وای‌فای مرکز)
+# به‌خاطر اشتباه یک نفر قفل نشوند، ولی حمله‌ی brute-force روی یک حساب مسدود شود.
+AXES_LOCKOUT_PARAMETERS = [["username", "ip_address"]]
+AXES_LOCKOUT_TEMPLATE = None                          # پاسخ پیش‌فرض ۴۲۹/۴۰۳
+# IP کاربر را django-ipware از X-Forwarded-For می‌خواند (سازگار با پراکسی cPanel).
 
 ROOT_URLCONF = 'site1.urls'
 
@@ -78,7 +111,8 @@ WSGI_APPLICATION = 'site1.wsgi.application'
 
 REST_FRAMEWORK ={
     'DEFAULT_AUTHENTICATION_CLASSES':(
-        'rest_framework.authentication.TokenAuthentication',
+        # Knox: توکن منقضی‌شونده و هش‌شده در DB (جایگزین TokenAuthentication پیش‌فرض)
+        'knox.auth.TokenAuthentication',
         'rest_framework.authentication.SessionAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES':(
@@ -94,6 +128,32 @@ REST_FRAMEWORK ={
     'DEFAULT_PAGINATION_CLASS':'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE':10,
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    # محدودیت نرخ درخواست: جلوگیری از brute-force روی لاگین/ثبت‌نام و سوءاستفاده از پیامک
+    'DEFAULT_THROTTLE_CLASSES': (
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ),
+    'DEFAULT_THROTTLE_RATES': {
+        # ناشناس: محدودیت ضد brute-force روی لاگین/توکن/ثبت‌نام.
+        # کلید بر اساس IP است؛ مقدار کمی بالاتر گرفته شده چون گاهی چند دانش‌آموز
+        # از یک IP مشترک (وای‌فای مرکز) هم‌زمان وارد می‌شوند.
+        'anon': '40/min',
+        'user': '600/min',     # کاربر لاگین‌کرده (با حاشیه‌ی امن برای پولینگ حین آزمون)
+        'sms': '30/hour',      # اسکوپ اختصاصی اندپوینت‌های ارسال پیامک (هزینه‌بر)
+    },
+}
+
+# تنظیمات Knox (احراز هویت توکنی امن)
+REST_KNOX = {
+    # توکن بعد از ۱۲ ساعت منقضی می‌شود؛ با AUTO_REFRESH هر درخواست انقضا را تمدید می‌کند
+    # پس کاربر فعال (مثلاً وسط آزمون) قطع نمی‌شود ولی سشن بی‌استفاده می‌میرد.
+    'TOKEN_TTL': timedelta(hours=12),
+    'AUTO_REFRESH': True,
+    'MIN_REFRESH_INTERVAL': 60,
+    # None = نامحدود؛ برای محدودکردن تعداد دستگاه فعال هر کاربر عددی بگذارید.
+    'TOKEN_LIMIT_PER_USER': None,
+    # هدر مثل قبل: Authorization: Token <token>  (سازگاری با فرانت فعلی)
+    'AUTH_HEADER_PREFIX': 'Token',
 }
 
 ### Normal DB Configs
@@ -101,11 +161,11 @@ REST_FRAMEWORK ={
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'arashat1_db',
-        'USER': 'arashat1_me',
-        'PASSWORD': 's89tqP~#T%M$M{-]',
-        'HOST': '127.0.0.1',
-        'PORT': '3306',
+        'NAME': config('DB_NAME'),
+        'USER': config('DB_USER'),
+        'PASSWORD': config('DB_PASSWORD'),
+        'HOST': config('DB_HOST', default='127.0.0.1'),
+        'PORT': config('DB_PORT', default='3306'),
         'OPTIONS': {
             'charset': 'utf8mb4',
             'init_command': "SET NAMES 'utf8mb4' COLLATE 'utf8mb4_unicode_ci', sql_mode='STRICT_TRANS_TABLES'",
@@ -114,10 +174,6 @@ DATABASES = {
 }
 
 
-
-CRONJOBS = [
-    ('*/0 * * * *', 'ExamsPlatform.exam_release')
-]
 # Password validation
 # https://docs.djangoproject.com/en/4.0/ref/settings/#auth-password-validators
 
@@ -136,27 +192,30 @@ AUTH_PASSWORD_VALIDATORS = [
     # },
 ]
 
-CORS_ORIGIN_WHITELIST = [
-     'http://localhost:3000',
-    #  'http://127.0.0.1:8000/'
-]
 CORS_ALLOWED_ORIGINS = [
     "https://www.arash-attar.com",
     "https://arash-attar.com",
     "https://api.arash-attar.com",
     'http://localhost:3000',
 ]
-# CSRF_TRUSTED_ORIGINS = [
-#     'https://arash-attar.com',
-#     'https://www.arash-attar.com',
-#     'https://api.arash-attar.com',
-# ]
+# اجازه‌ی ارسال کوکی/هدر احراز هویت در درخواست‌های cross-origin (برای SessionAuthentication)
+CORS_ALLOW_CREDENTIALS = True
 
-FTPS_HOST = '176.65.241.163'
-FTPS_PORT = 21
-FTPS_USER = 'arashat2'
-FTPS_PASSWORD = 'k!!Fc005Em5PUx'
-FTPS_BASE_URL = 'https://center.arash-attar.com'
+CSRF_TRUSTED_ORIGINS = [
+    'https://arash-attar.com',
+    'https://www.arash-attar.com',
+    'https://api.arash-attar.com',
+]
+
+FTPS_HOST = config('FTPS_HOST')
+FTPS_PORT = config('FTPS_PORT', default=21, cast=int)
+FTPS_USER = config('FTPS_USER')
+FTPS_PASSWORD = config('FTPS_PASSWORD')
+FTPS_BASE_URL = config('FTPS_BASE_URL', default='https://center.arash-attar.com')
+
+# SMS.ir (از .env؛ موقع production کلید واقعی را در .env بگذار)
+SMS_API_KEY = config('SMS_API_KEY')
+SMS_LINE_NUMBER = config('SMS_LINE_NUMBER', default='3000773247')
 
 
            
@@ -200,8 +259,13 @@ SPECTACULAR_SETTINGS = {
             'name': 'Authorization',
         }
     },
-    # اگر UI فقط برای ادمین‌ها باشه:
-    # 'SERVE_PERMISSIONS': ['rest_framework.permissions.IsAdminUser'],
+    # schema فقط برای superuser سرو شود (دفاع لایه‌ای در کنار permission_classes روی urlها)
+    'SERVE_PERMISSIONS': ['site1.permissions.IsSuperUser'],
+    # رفع تداخل نام enumها (جنسیت/پایه در چند مدل choices یکسان دارند → یک نام واحد)
+    'ENUM_NAME_OVERRIDES': {
+        'StudentGenderEnum': [('پسر', 'پسر'), ('دختر', 'دختر')],
+        'StudentGradeEnum': [('دهم', 'دهم'), ('یازدهم', 'یازدهم'), ('دوازدهم', 'دوازدهم')],
+    },
     # اگر JSON اسکیما رو نمی‌خوای داخل UI نمایش بده:
     # 'SERVE_INCLUDE_SCHEMA': False,
 }
@@ -219,20 +283,25 @@ USE_I18N = True
 USE_TZ = True
 
 
-## Security
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE =True
-SESSION_EXPIRE_AT_BROWSER_CLOSE = True
-SECURE_SSL_REDIRECT = True
-##
-SECURE_BROWSER_XSS_FILTER = True
-SECURE_CONTENT_TYPE_NOSNIFF = True
-SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-SECURE_HSTS_PRELOAD = True
-SECURE_HSTS_SECONDS = 15768000
-# SESSION_COOKIE_SECURE = True
-# CSRF_COOKIE_SECURE = True
-X_FRAME_OPTIONS = 'DENY'
+# ## Security
+# تنظیماتی که در هر حالتی امن‌اند (سازگار با dev و prod)
+SECURE_CONTENT_TYPE_NOSNIFF = True          # جلوگیری از MIME sniffing
+X_FRAME_OPTIONS = 'DENY'                     # جلوگیری از clickjacking
+SESSION_COOKIE_HTTPONLY = True              # کوکی سشن از دسترس جاوااسکریپت خارج
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True      # پایان سشن با بستن مرورگر
+SECURE_REFERRER_POLICY = 'same-origin'
+
+# تنظیمات مخصوص production (فقط وقتی DEBUG=False) تا توسعه‌ی محلی روی HTTP نشکند
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True               # ریدایرکت اجباری به HTTPS
+    SESSION_COOKIE_SECURE = True             # کوکی سشن فقط روی HTTPS
+    CSRF_COOKIE_SECURE = True                # کوکی CSRF فقط روی HTTPS
+    SECURE_HSTS_SECONDS = 31536000           # یک سال HSTS
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    # چون پشت پراکسی/پسنجر هستیم، هدر فوروارد پروتکل را به Django می‌شناسانیم
+    # (نیازمند ست‌شدن X-Forwarded-Proto توسط وب‌سرور؛ در صورت نبود این هدر، این خط را غیرفعال کنید)
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 ##
 
@@ -381,8 +450,8 @@ JAZZMIN_UI_TWEAKS = {
 }
 
 
-DATA_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 10 MB, adjust as needed
-FILE_UPLOAD_MAX_MEMORY_SIZE = 52428800
+DATA_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 50 MB, adjust as needed
+FILE_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 50 MB
 # STATIC_URL = '/static/'
 STATIC_URL = '/Collected/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'Storage/staticfiles')
@@ -400,3 +469,16 @@ os.makedirs(TEMP_UPLOAD_DIR, exist_ok=True)
 # https://docs.djangoproject.com/en/4.0/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+# از فونت 
+# branding\font\IRANSansWeb_Medium.ttf
+# استفاده میکنم
+
+# اینا هم تنظیمات داخل setting پروژه 
+# STATIC_URL = '/Collected/static/'
+# STATIC_ROOT = os.path.join(BASE_DIR, 'Storage/staticfiles')
+
+# MEDIA_ROOT = os.path.join(BASE_DIR, 'Storage')
+# MEDIA_URL = '/Storage/'
+# همچنین DEBUG=False

@@ -10,7 +10,10 @@ from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 
 from rest_framework.views import APIView
+from drf_spectacular.utils import extend_schema
+from drf_spectacular.types import OpenApiTypes
 
+@extend_schema(responses=OpenApiTypes.OBJECT)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def ExamBox(request):
@@ -28,6 +31,7 @@ def ExamBox(request):
         return Response((E_serializer.ExamSerializer(exams_item).data, E_serializer.ExamAverageSerializer(exams_avg).data), status=status.HTTP_200_OK)
 
 
+@extend_schema(responses=OpenApiTypes.OBJECT)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def AssignmentBox(request):
@@ -47,6 +51,7 @@ def AssignmentBox(request):
         return Response((assignment_dict, A_serializer.AssignmentAverageSerializer(assignment_avg).data), status=status.HTTP_200_OK)
 
 
+@extend_schema(responses=OpenApiTypes.OBJECT)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def ClassroomBox(request):
@@ -59,6 +64,7 @@ def ClassroomBox(request):
         
 
 
+@extend_schema(responses=OpenApiTypes.OBJECT)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def UserInfoBox(request):
