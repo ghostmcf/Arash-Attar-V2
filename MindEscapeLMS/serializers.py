@@ -6,7 +6,29 @@ from rest_framework.validators import UniqueValidator
 from django.contrib.auth.password_validation import validate_password
 from StudentsInfo.models import StudentUser
 from drf_writable_nested import WritableNestedModelSerializer
+from django.contrib.auth import authenticate
 
+
+class LoginSerializer(serializers.Serializer):
+    username = serializers.CharField()
+    password = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+
+        user = authenticate(
+            request=request,
+            username=attrs["username"],
+            password=attrs["password"],
+        )
+
+        if user is None:
+            raise serializers.ValidationError(
+                "Invalid username or password."
+            )
+
+        attrs["user"] = user
+        return attrs
 
 #Serializer to Get User Details using Django Token Authentication
 class UserSerializer(serializers.ModelSerializer):

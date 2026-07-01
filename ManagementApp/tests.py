@@ -14,10 +14,25 @@ from django.contrib.auth.models import Group, User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
+from django.core.management import call_command
+
 from ExamsPlatform.models import Exam, ExamAverage, ExamScore, ExamScoreOffline
 from AssignmentPlatform.models import Assignment, AssignmentAverage, AssignmentScore
 from ClassroomsPlatform.models import ClassroomAverage
 from StudentsInfo.models import StudentUser, StudentYearRecord, AttendanceRecord
+from ManagementApp.services import archive_academic_year
+from knox.models import AuthToken
+
+
+def _login(client, user):
+    """احراز هویت تست از طریق توکن Knox.
+
+    چون SessionAuthentication در DRF غیرفعال شده، دیگر force_login (کوکی نشست)
+    اندپوینت‌های API را احراز نمی‌کند؛ به‌جایش یک توکن Knox می‌سازیم و روی هدر
+    پیش‌فرض کلاینت تست می‌گذاریم تا همان مسیر احراز هویت پروداکشن تست شود.
+    """
+    _, token = AuthToken.objects.create(user)
+    client.defaults['HTTP_AUTHORIZATION'] = f'Token {token}'
 
 
 def _make_xlsx(headers, rows):
@@ -51,18 +66,18 @@ class AccessControlTests(TestCase):
         self.assertIn(resp.status_code, (401, 403))
 
     def test_export_exam_scores_blocks_student(self):
-        self.client.force_login(self.student)
+        _login(self.client, self.student)
         resp = self.client.get(f"/management/groups/{self.group.id}/export_exam_scores/")
         self.assertEqual(resp.status_code, 403)
 
     def test_export_exam_scores_allows_admin(self):
-        self.client.force_login(self.admin)
+        _login(self.client, self.admin)
         resp = self.client.get(f"/management/groups/{self.group.id}/export_exam_scores/")
         self.assertEqual(resp.status_code, 200)
 
     # ---- export_assignment_scores (قبلاً AllowAny) ----
     def test_export_assignment_scores_blocks_student(self):
-        self.client.force_login(self.student)
+        _login(self.client, self.student)
         resp = self.client.get(
             f"/management/groups/{self.group.id}/export_assignment_scores/"
         )
@@ -70,7 +85,7 @@ class AccessControlTests(TestCase):
 
     # ---- classroom_presence_summary (قبلاً AllowAny) ----
     def test_classroom_summary_blocks_student(self):
-        self.client.force_login(self.student)
+        _login(self.client, self.student)
         resp = self.client.get(
             f"/management/users/{self.student.id}/classroom_presence_summary/"
         )
@@ -78,24 +93,24 @@ class AccessControlTests(TestCase):
 
     # ---- NotificationViewSet (قبلاً بدون permission) ----
     def test_notifications_list_blocks_student(self):
-        self.client.force_login(self.student)
+        _login(self.client, self.student)
         resp = self.client.get("/management/notifications/")
         self.assertEqual(resp.status_code, 403)
 
     def test_notifications_list_allows_admin(self):
-        self.client.force_login(self.admin)
+        _login(self.client, self.admin)
         resp = self.client.get("/management/notifications/")
         self.assertEqual(resp.status_code, 200)
 
     # ---- IDOR: کاربر نباید نوتیف کاربر دیگری را ببیند ----
     def test_user_notifications_blocks_cross_user(self):
         other = User.objects.create_user(username="other", password="pw")
-        self.client.force_login(self.student)
+        _login(self.client, self.student)
         resp = self.client.get(f"/management/notifications/{other.username}/user/")
         self.assertEqual(resp.status_code, 403)
 
     def test_user_notifications_allows_self(self):
-        self.client.force_login(self.student)
+        _login(self.client, self.student)
         resp = self.client.get(
             f"/management/notifications/{self.student.username}/user/"
         )
@@ -137,13 +152,11 @@ class ArchiveYearTests(TestCase):
             score=70, assignment_presence=True, assignment_finished=True,
         )
 
-    def test_archive_creates_records_and_wipes_data(self):
-        self.client.force_login(self.admin)
-        resp = self.client.post(
-            "/management/archive-year/", {"study_year": "1403-1404", "confirm": "true"},
-            content_type="application/json",
-        )
-        self.assertEqual(resp.status_code, 200)
+    def test_archive_via_command_wipes_and_snapshots(self):
+        # اجرای management command (بدون پرسش تعاملی و بدون بکاپ در محیط تست)
+        # stdout را capture می‌کنیم تا کنسول ویندوز (cp1252) روی خروجی فارسی خطا ندهد
+        call_command('archive_year', yes=True, skip_backup=True, study_year='1403-1404',
+                     stdout=io.StringIO(), stderr=io.StringIO())
 
         # رکورد سال ساخته شد با مقادیر درست
         rec = StudentYearRecord.objects.get(student=self.student, study_year="1403-1404")
@@ -165,11 +178,10 @@ class ArchiveYearTests(TestCase):
         self.student.refresh_from_db()
         self.assertFalse(self.student.is_active)
 
-    def test_archive_requires_admin(self):
-        student = User.objects.create_user(username="s2", password="pw")
-        self.client.force_login(student)
-        resp = self.client.post("/management/archive-year/", {}, content_type="application/json")
-        self.assertEqual(resp.status_code, 403)
+    def test_archive_service_returns_count(self):
+        result = archive_academic_year(study_year='1402-1403', actor='test')
+        self.assertEqual(result['study_year'], '1402-1403')
+        self.assertEqual(result['students_archived'], 1)
 
 
 class OfflineExamUploadTests(TestCase):
@@ -183,7 +195,7 @@ class OfflineExamUploadTests(TestCase):
         ExamAverage.objects.create(user=self.student)
 
     def test_offline_exam_updates_average(self):
-        self.client.force_login(self.admin)
+        _login(self.client, self.admin)
         f = _make_xlsx(["کد ملی", "درصد"], [["0011", 90]])
         resp = self.client.post("/management/upload-offline-exam/", {
             "file": f, "exam_name": "آزمون حضوری", "group": "G", "date": "1403/07/15",
@@ -196,7 +208,7 @@ class OfflineExamUploadTests(TestCase):
         self.assertEqual(int(avg.average), 90)
 
     def test_offline_exam_requires_admin(self):
-        self.client.force_login(self.student)
+        _login(self.client, self.student)
         f = _make_xlsx(["کد ملی", "درصد"], [["0011", 90]])
         resp = self.client.post("/management/upload-offline-exam/", {
             "file": f, "exam_name": "x", "group": "G", "date": "1403/07/15",
@@ -214,7 +226,7 @@ class AttendanceUploadTests(TestCase):
         self.student.groups.add(self.group)
 
     def test_attendance_counts_absence(self):
-        self.client.force_login(self.admin)
+        _login(self.client, self.admin)
         f = _make_xlsx(["کد ملی", "وضعیت"], [["0011", "غایب"]])
         resp = self.client.post("/management/upload-attendance/", {
             "file": f, "group": "G", "session_title": "جلسه ۱", "date": "1403/07/15",
@@ -227,7 +239,7 @@ class AttendanceUploadTests(TestCase):
 
     def test_attendance_idempotent_reupload(self):
         # آپلود مجدد همان جلسه نباید غیبت را دوبرابر کند
-        self.client.force_login(self.admin)
+        _login(self.client, self.admin)
         for _ in range(2):
             f = _make_xlsx(["کد ملی", "وضعیت"], [["0011", "غایب"]])
             self.client.post("/management/upload-attendance/", {
@@ -269,7 +281,7 @@ class SmsPanelTests(TestCase):
     def test_exam_send_requires_permission(self):
         exam = Exam.objects.create(exam_group=self.group, ExamName="آزمون")
         self.assertFalse(exam.sms_permission)
-        self.client.force_login(self.admin)
+        _login(self.client, self.admin)
         resp = self.client.post(
             f"/management/exams/{exam.exam_id}/send-sms/",
             {"target": "mother", "user_ids": "all"}, content_type="application/json",

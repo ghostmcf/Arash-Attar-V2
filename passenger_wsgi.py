@@ -1,1 +1,1 @@
-from site1.wsgi import application
+from MindEscapeLMS.wsgi import application

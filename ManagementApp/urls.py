@@ -26,7 +26,7 @@ urlpatterns = [
     path('upload-excel/', views.UploadExcelView.as_view(), name='upload-excel'),
     path('upload-offline-exam/', views.UploadOfflineExamView.as_view(), name='upload-offline-exam'),
     path('upload-attendance/', views.UploadAttendanceView.as_view(), name='upload-attendance'),
-    path('archive-year/', views.ArchiveYearView.as_view(), name='archive-year'),
+    # archive-year از HTTP حذف شد → حالا فقط management command: python manage.py archive_year
     path('change-password/', views.change_user_password, name='change-password'),
     # zappier/zappier1 غیرفعال‌اند (ویوهایشان حذف شده؛ ارجاع به آن‌ها check را می‌شکست).
     # در صورت نیاز، آن‌ها را به management command تبدیل کنید نه endpoint.

@@ -90,4 +90,4 @@ whitenoise
 drf-spectacular
 drf-spectacular-sidecar
 reportlab
-decouple
+django-otp

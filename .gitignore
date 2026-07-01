@@ -7,7 +7,7 @@ ClassroomsPlatform/__pycache__/
 ExamsPlatform/__pycache__/
 Frontend/__pycache__/
 ManagementApp/__pycache__/
-site1/__pycache__/
+MindEscapeLMS/__pycache__/
 StudentsInfo/__pycache__/
 **/__pycache__
 **/migrations/*
@@ -24,3 +24,9 @@ graphify-out/
 storage.sqlite
 Arash-Attar-V2-main.zip
 Frontend/scriptsbak.py
+migtest.sqlite3
+backups/
+settings_migtest.py
+# فایل‌های تست (طبق درخواست، خارج از گیت نگه داشته می‌شوند)
+**/tests.py
+**/tests/

@@ -7,18 +7,20 @@ from ExamsPlatform.models import Question,Exam,ExamScore,ExamScoreOffline,ExamAv
 from StudentsInfo.models import DirectMoney,SignedCheck,StudentUser,Books,Notification, UserNotification,StudentYearRecord,YearExamRecord,YearAssignmentRecord,AttendanceRecord
 from StudentsInfo.serializers import NotificationSerializer, UserNotificationSerializer
 from django.contrib.auth.models import Group,User
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from knox.models import AuthToken
-from site1.permissions import IsSuperUser
-from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, inline_serializer
 from drf_spectacular.types import OpenApiTypes
+from rest_framework import serializers as rfs
 from rest_framework.decorators import api_view,action
 from rest_framework.response import Response
 from rest_framework import status,viewsets,views,parsers
 # from rest_framework.parsers import MultiPartParser
 from rest_framework.decorators import api_view,permission_classes
 from rest_framework.permissions import IsAuthenticated,IsAdminUser,BasePermission,AllowAny
-from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.throttling import ScopedRateThrottle, UserRateThrottle
 from .serializers import GroupsSerializer,GroupSerializer,ClassroomSerializer,ClassroomsSerializer,AssignmentSerializer,ExamSerializer,QuestionSerializer,SmallUserSerializer,UserSerializer,AssignmentScoreSerializer,AssignmentScoresSerializer,SignedCheckSerializer,DirectMoneySerializer,ExamScoresSerializer,ExamSerializerWithQuestion,CreateStudentUserSerializer,UpdateStudentUserSerializer,ExamSerializerWithGroup,AssignmentSerializerWithGroup,BooksSerializer,BooksUserSerializer,ExamScoresSerializerWithExamName,ExamAverageNCSerializer,StudentYearRecordSerializer,AttendanceRecordSerializer
 import pandas as pd
 import io
@@ -36,7 +38,12 @@ class IsStaffUser(BasePermission):
     def has_permission(self,request,view):
         return request.user and request.user.is_staff
 
-@extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT)
+@extend_schema(
+    request=inline_serializer(name='AdminChangePasswordRequest', fields={
+        'username': rfs.CharField(),
+        'new_password': rfs.CharField(),
+    }),
+    responses=OpenApiTypes.OBJECT)
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
 def change_user_password(request):
@@ -56,6 +63,14 @@ def change_user_password(request):
         return Response({'error': 'Only a superuser can change a staff/superuser password'},
                         status=status.HTTP_403_FORBIDDEN)
 
+    # الزامِ رمزِ قوی فقط برای حساب‌های مدیریتی (کدملیِ دانش‌آموزان دست‌نخورده می‌ماند)
+    if user.is_staff or user.is_superuser:
+        try:
+            validate_password(new_password, user=user)
+        except ValidationError as e:
+            return Response({'error': 'weak password', 'messages': e.messages},
+                            status=status.HTTP_400_BAD_REQUEST)
+
     user.set_password(new_password)
     user.save()
     # باطل‌کردن توکن‌های فعال کاربر هدف تا با رمز جدید دوباره لاگین کند
@@ -64,122 +79,9 @@ def change_user_password(request):
     return Response({'success': 'Password updated successfully'}, status=status.HTTP_200_OK)
 
 
-def _current_study_year():
-    """سال تحصیلی جلالی جاری به‌صورت 'YYYY-YYYY' (سال تحصیلی از مهر شروع می‌شود)."""
-    today = jdatetime.date.today()
-    jy = today.year
-    return f"{jy}-{jy+1}" if today.month >= 7 else f"{jy-1}-{jy}"
-
-
-@extend_schema_view(post=extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT))
-class ArchiveYearView(views.APIView):
-    """
-    بایگانی پایان سال تحصیلی (یک‌بار در آخر سال، اتمیک):
-      ۱) برای هر دانش‌آموز یک StudentYearRecord + جزئیات تک‌تک امتحان/تکلیف می‌سازد.
-      ۲) همه‌ی دانش‌آموزها را غیرفعال می‌کند (اکسل سال جدید برگشتی‌ها را دوباره فعال می‌کند).
-      ۳) Exam/Assignment/Classroom/Group و سه مدل Average را پاک می‌کند (Scoreها با CASCADE پاک می‌شوند).
-    Body اختیاری: {"study_year": "1403-1404"} — در صورت نبود، از سال جلالی جاری ساخته می‌شود.
-    """
-    permission_classes = [IsSuperUser]
-
-    def post(self, request):
-        logger = logging.getLogger('management_logger')
-        # تأیید صریح لازم است (جلوگیری از اجرای تصادفیِ این عملیات تخریبی)
-        if str(request.data.get('confirm')).lower() != 'true':
-            return Response(
-                {"error": "این عملیات همه‌ی داده‌ی تحصیلی را پاک می‌کند. برای ادامه confirm=true بفرستید."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        study_year = (request.data.get('study_year') or '').strip() or _current_study_year()
-        archived = 0
-
-        with transaction.atomic():
-            students = User.objects.filter(is_staff=False)
-            for user in students:
-                group        = user.groups.first()
-                su           = StudentUser.objects.filter(student_user=user).first()
-                exam_avg     = ExamAverage.objects.filter(user=user).first()
-                assign_avg   = AssignmentAverage.objects.filter(user=user).first()
-                class_avg    = ClassroomAverage.objects.filter(user=user).first()
-
-                # تازه‌سازی میانگین‌ها قبل از اسنپ‌شات
-                if exam_avg:   exam_avg.get_average()
-                if assign_avg: assign_avg.get_average()
-                if class_avg:  class_avg.get_absence()
-
-                grade        = (group.group_grade if group else None) or (su.student_grade if su else None)
-                group_name   = group.name if group else None
-                student_type = su.student_type if su else None
-                is_graduate  = (grade == 'دوازدهم')
-                year_status  = 'فارغ التحصیل' if is_graduate else 'در حال تحصیل'
-
-                rec, _ = StudentYearRecord.objects.update_or_create(
-                    student=user, study_year=study_year,
-                    defaults=dict(
-                        student_name=(f"{user.first_name} {user.last_name}".strip() or user.username),
-                        grade=grade, group_name=group_name, student_type=student_type,
-                        exam_average=(exam_avg.average if exam_avg else 0),
-                        exam_final_average=(exam_avg.final_average if exam_avg else 0),
-                        exam_count=(exam_avg.exam_count if exam_avg else 0),
-                        exam_absent_count=(exam_avg.exam_abscent_count if exam_avg else 0),
-                        assignment_average=(assign_avg.average if assign_avg else 0),
-                        assignment_count=(assign_avg.assignment_count if assign_avg else 0),
-                        assignment_absent_count=(assign_avg.assignment_abscent_count if assign_avg else 0),
-                        classroom_absence_count=(class_avg.absence_count if class_avg else 0),
-                        status=year_status,
-                    )
-                )
-
-                # جزئیات (idempotent: اجرای مجدد همان سال بازنویسی می‌کند)
-                rec.exam_records.all().delete()
-                rec.assignment_records.all().delete()
-
-                exam_rows = []
-                if exam_avg:
-                    for es in exam_avg.examscore_set.select_related('exam').all():
-                        exam_rows.append(YearExamRecord(
-                            year_record=rec, title=es.exam.ExamName, headline=es.exam.exam_headline,
-                            date=es.exam.exam_available_time_end, score=es.score,
-                            present=es.exam_peresence, is_offline=False))
-                    for eso in exam_avg.examscoreoffline_set.select_related('exam').all():
-                        exam_rows.append(YearExamRecord(
-                            year_record=rec, title=eso.exam.ExamName, headline=eso.exam.exam_headline,
-                            date=eso.exam.exam_available_time_end, score=eso.score,
-                            present=eso.exam_peresence, is_offline=True))
-                YearExamRecord.objects.bulk_create(exam_rows)
-
-                assign_rows = []
-                if assign_avg:
-                    for a in assign_avg.assignmentscore_set.select_related('assignment').all():
-                        assign_rows.append(YearAssignmentRecord(
-                            year_record=rec, title=a.assignment.AssignmentName, headline=a.assignment.assignment_headline,
-                            date=a.assignment.assignment_available_time_end, score=a.score,
-                            present=a.assignment_presence))
-                YearAssignmentRecord.objects.bulk_create(assign_rows)
-
-                if su:
-                    su.student_status = year_status
-                    su.save(update_fields=['student_status'])
-                archived += 1
-
-            # غیرفعال‌سازی همه‌ی دانش‌آموزها؛ اکسل سال جدید برگشتی‌ها را فعال می‌کند
-            students.update(is_active=False)
-
-            # پاک‌سازی داده‌ی تحصیلی سال (CASCADE: ExamScore/AssignmentScore/ClassroomPresence)
-            Exam.objects.all().delete()
-            Assignment.objects.all().delete()
-            Classroom.objects.all().delete()
-            # سه مدل Average با اولین اکسل سال جدید دوباره ساخته می‌شوند
-            ExamAverage.objects.all().delete()
-            AssignmentAverage.objects.all().delete()
-            ClassroomAverage.objects.all().delete()
-            Group.objects.all().delete()
-
-        logger.info(f"{request.user.username} archived study_year={study_year}: {archived} students")
-        return Response(
-            {"message": "Year archived successfully", "study_year": study_year, "students_archived": archived},
-            status=status.HTTP_200_OK
-        )
+# بایگانی پایان سال از HTTP خارج شد و به management command منتقل شد (امنیت + بکاپ اجباری):
+#     python manage.py archive_year
+# منطق در ManagementApp/services.py::archive_academic_year
 
 # @api_view(['GET'])
 # @permission_classes([IsAdminUser])
@@ -193,6 +95,15 @@ class ArchiveYearView(views.APIView):
 #     scripts.cfas()
 #     return Response({"message": "Run Successfully"}, status=status.HTTP_200_OK)    
 
+
+
+class SmsRateThrottle(UserRateThrottle):
+    """نرخِ اختصاصیِ ارسال پیامک (اسکوپ 'sms' = ۳۰ در ساعت).
+
+    چون هر پیامک هزینه‌ی مالی دارد، اندپوینت‌های ارسال پیامک نباید زیرِ نرخِ
+    عمومیِ کاربر (۶۰۰ در دقیقه) قرار بگیرند. کلید بر اساس کاربرِ لاگین‌کرده است.
+    """
+    scope = 'sms'
 
 
 #########################   Users - Groups - Attendance - SMS
@@ -470,7 +381,7 @@ class UsersIndex (viewsets.ModelViewSet):
         }, status=status.HTTP_200_OK)
 
 class NotificationViewSet(viewsets.ModelViewSet):
-    queryset = Notification.objects.all()
+    queryset = Notification.objects.all().order_by('-created_at')
     serializer_class = NotificationSerializer
     permission_classes = [IsAdminUser, IsAuthenticated]
     http_method_names = ['get','post','delete','patch']
@@ -518,7 +429,14 @@ class NotificationViewSet(viewsets.ModelViewSet):
         return Response({"status": "Read And Removed"},status=status.HTTP_200_OK)
 
 @extend_schema_view(
-    custom=extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT),
+    custom=extend_schema(
+        request=inline_serializer(name='CustomSmsRequest', fields={
+            'group_ids': rfs.ListField(child=rfs.IntegerField(), required=False, help_text='لیست id گروه‌ها'),
+            'user_ids': rfs.ListField(child=rfs.IntegerField(), required=False, help_text='لیست id افراد'),
+            'message': rfs.CharField(help_text='متن پیام'),
+            'target': rfs.ChoiceField(choices=['mother', 'father', 'both'], required=False, help_text='پیش‌فرض mother'),
+        }),
+        responses=OpenApiTypes.OBJECT),
 )
 class SMSManagerIndex(viewsets.ViewSet):
     permission_classes = [IsAdminUser, IsAuthenticated]
@@ -684,8 +602,14 @@ class AssignmentsIndex (viewsets.ModelViewSet):
         assignment = get_object_or_404(Assignment, assignment_id=pk)
         return Response(sms_manager.assignment_recipients(assignment), status=status.HTTP_200_OK)
 
-    @extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT)
-    @action(detail=True, methods=['post'], permission_classes=[IsAdminUser], url_path='send-sms')
+    @extend_schema(
+        request=inline_serializer(name='AssignmentSendSmsRequest', fields={
+            'user_ids': rfs.JSONField(required=False, help_text='لیست id افراد یا "all" (پیش‌فرض all)'),
+            'target': rfs.ChoiceField(choices=['mother', 'father', 'both'], required=False, help_text='پیش‌فرض mother'),
+        }),
+        responses=OpenApiTypes.OBJECT)
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminUser],
+            throttle_classes=[SmsRateThrottle], url_path='send-sms')
     def send_sms(self, request, pk=None):
         """ارسال پیامک نمره‌ی این تکلیف.
         body: {"user_ids": [...] یا "all", "target": "mother"|"father"|"both"}"""
@@ -893,8 +817,14 @@ class ExamsIndex (viewsets.ModelViewSet):
         exam = get_object_or_404(Exam, exam_id=pk)
         return Response(sms_manager.exam_recipients(exam), status=status.HTTP_200_OK)
 
-    @extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT)
-    @action(detail=True, methods=['post'], permission_classes=[IsAdminUser], url_path='send-sms')
+    @extend_schema(
+        request=inline_serializer(name='ExamSendSmsRequest', fields={
+            'user_ids': rfs.JSONField(required=False, help_text='لیست id افراد یا "all" (پیش‌فرض all)'),
+            'target': rfs.ChoiceField(choices=['mother', 'father', 'both'], required=False, help_text='پیش‌فرض mother'),
+        }),
+        responses=OpenApiTypes.OBJECT)
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminUser],
+            throttle_classes=[SmsRateThrottle], url_path='send-sms')
     def send_sms(self, request, pk=None):
         """ارسال پیامک نمره‌ی این آزمون (شامل آزمون حضوری/آفلاین).
         body: {"user_ids": [...] یا "all", "target": "mother"|"father"|"both"}"""
@@ -1008,7 +938,11 @@ class DirectMoneyIndex (viewsets.ModelViewSet):
 ############################# Uploads
   
 ###########Upload working stable version
-@extend_schema_view(post=extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT))
+@extend_schema_view(post=extend_schema(
+    request=inline_serializer(name='UploadExcelRequest', fields={
+        'file': rfs.FileField(help_text='فایل اکسل دانش‌آموزان'),
+    }),
+    responses=OpenApiTypes.OBJECT))
 class UploadExcelView(views.APIView):
     http_method_names = ['post']
     permission_classes = [IsAdminUser, IsAuthenticated]
@@ -1172,7 +1106,15 @@ def _is_absent_value(v):
     return str(v).strip() in ('غایب', 'absent', 'Absent', '0', 'false', 'False', 'خیر')
 
 
-@extend_schema_view(post=extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT))
+@extend_schema_view(post=extend_schema(
+    request=inline_serializer(name='UploadOfflineExamRequest', fields={
+        'file': rfs.FileField(help_text='اکسل نتایج (ستون‌ها: کد ملی، درصد، حاضر?)'),
+        'exam_name': rfs.CharField(),
+        'group': rfs.CharField(help_text='نام گروه'),
+        'date': rfs.CharField(help_text="تاریخ جلالی مثل 1403/07/15"),
+        'headline': rfs.CharField(required=False),
+    }),
+    responses=OpenApiTypes.OBJECT))
 class UploadOfflineExamView(views.APIView):
     """
     آپلود نتایج یک امتحان حضوری (آفلاین).
@@ -1249,7 +1191,14 @@ class UploadOfflineExamView(views.APIView):
                          "applied": applied, "skipped": skipped}, status=status.HTTP_200_OK)
 
 
-@extend_schema_view(post=extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT))
+@extend_schema_view(post=extend_schema(
+    request=inline_serializer(name='UploadAttendanceRequest', fields={
+        'file': rfs.FileField(help_text='اکسل حضور و غیاب (ستون‌ها: کد ملی، وضعیت?)'),
+        'group': rfs.CharField(help_text='نام گروه'),
+        'session_title': rfs.CharField(),
+        'date': rfs.CharField(help_text="تاریخ جلالی مثل 1403/07/15"),
+    }),
+    responses=OpenApiTypes.OBJECT))
 class UploadAttendanceView(views.APIView):
     """
     آپلود حضور و غیاب یک جلسه‌ی حضوری.

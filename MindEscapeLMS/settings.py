@@ -51,13 +51,15 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'rest_framework.authtoken',
     'knox',
     'axes',
     'corsheaders',
     # 'drf_yasg',
     'drf_spectacular',
     'drf_spectacular_sidecar',
+    # TOTP دو‌مرحله‌ای (فقط API؛ اجباری برای staff/superuser) — هر اپ Authenticator
+    'django_otp',
+    'django_otp.plugins.otp_totp',
 ]
 
 MIDDLEWARE = [
@@ -89,7 +91,7 @@ AXES_LOCKOUT_PARAMETERS = [["username", "ip_address"]]
 AXES_LOCKOUT_TEMPLATE = None                          # پاسخ پیش‌فرض ۴۲۹/۴۰۳
 # IP کاربر را django-ipware از X-Forwarded-For می‌خواند (سازگار با پراکسی cPanel).
 
-ROOT_URLCONF = 'site1.urls'
+ROOT_URLCONF = 'MindEscapeLMS.urls'
 
 TEMPLATES = [
     {
@@ -107,17 +109,23 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'site1.wsgi.application'
+WSGI_APPLICATION = 'MindEscapeLMS.wsgi.application'
 
 REST_FRAMEWORK ={
     'DEFAULT_AUTHENTICATION_CLASSES':(
-        # Knox: توکن منقضی‌شونده و هش‌شده در DB (جایگزین TokenAuthentication پیش‌فرض)
-        'knox.auth.TokenAuthentication',
-        'rest_framework.authentication.SessionAuthentication',
+        # Knox + ردیابیِ نشست (زیرکلاسِ knox.auth.TokenAuthentication که «آخرین استفاده»
+        # را برای پنلِ دستگاه‌های فعال آپدیت می‌کند). توکن منقضی‌شونده و هش‌شده در DB.
+        'MindEscapeLMS.auth.SessionTrackingTokenAuthentication',
+        # 'rest_framework.authentication.SessionAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES':(
-        'rest_framework.permissions.IsAuthenticated',        
+        'rest_framework.permissions.IsAuthenticated',
         # 'rest_framework.permissions.AllowAny',
+    ),
+    # فقط JSON — رابط گرافیکیِ Browsable API حذف می‌شود (برای هیچ‌کس، حتی لاگین‌کرده).
+    # پنل ادمین جنگو (/accounts) و Swagger (فقط superuser) جدا هستند و تحت تأثیر نیستند.
+    'DEFAULT_RENDERER_CLASSES': (
+        'rest_framework.renderers.JSONRenderer',
     ),
     'DEFAULT_FILTER_BACKENDS':(
         'django_filters.rest_framework.DjangoFilterBackend',
@@ -178,18 +186,14 @@ DATABASES = {
 # https://docs.djangoproject.com/en/4.0/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
-    # {
-    #     'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-    # },
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
     },
-    # {
-    #     'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-    # },
-    # {
-    #     'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-    # },
+    # رمزِ قوی فقط برای حساب‌های staff/superuser الزامی می‌شود (کدملیِ دانش‌آموزان دست‌نخورده).
+    {
+        'NAME': 'MindEscapeLMS.validators.AdminStrongPasswordValidator',
+        'OPTIONS': {'min_length': 10},
+    },
 ]
 
 CORS_ALLOWED_ORIGINS = [
@@ -198,8 +202,10 @@ CORS_ALLOWED_ORIGINS = [
     "https://api.arash-attar.com",
     'http://localhost:3000',
 ]
-# اجازه‌ی ارسال کوکی/هدر احراز هویت در درخواست‌های cross-origin (برای SessionAuthentication)
-CORS_ALLOW_CREDENTIALS = True
+# احراز هویت توکنیِ Knox در هدر Authorization انجام می‌شود (نه کوکی)؛ چون SessionAuthentication
+# غیرفعال است، ارسال credentials در درخواست‌های cross-origin لازم نیست و بستنش امن‌تر است.
+# (پنل ادمین /accounts/ same-origin است و به CORS ربطی ندارد.)
+CORS_ALLOW_CREDENTIALS = False
 
 CSRF_TRUSTED_ORIGINS = [
     'https://arash-attar.com',
@@ -260,7 +266,7 @@ SPECTACULAR_SETTINGS = {
         }
     },
     # schema فقط برای superuser سرو شود (دفاع لایه‌ای در کنار permission_classes روی urlها)
-    'SERVE_PERMISSIONS': ['site1.permissions.IsSuperUser'],
+    'SERVE_PERMISSIONS': ['MindEscapeLMS.permissions.IsSuperUser'],
     # رفع تداخل نام enumها (جنسیت/پایه در چند مدل choices یکسان دارند → یک نام واحد)
     'ENUM_NAME_OVERRIDES': {
         'StudentGenderEnum': [('پسر', 'پسر'), ('دختر', 'دختر')],
@@ -428,6 +434,13 @@ LOGGING = {
         },
     },
 }
+
+
+# کرون‌ها (django_crontab). روی سرور با `python manage.py crontab add` فعال می‌شوند.
+# هر شب ساعت ۳:۳۰ توکن‌های Knox منقضی‌شده پاک می‌شوند.
+CRONJOBS = [
+    ('30 3 * * *', 'django.core.management.call_command', ['cleanup_tokens']),
+]
 
 
 JAZZMIN_SETTINGS = {

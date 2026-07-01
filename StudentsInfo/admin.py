@@ -85,4 +85,28 @@ class NotificationAdmin(admin.ModelAdmin):
             return format_html('<a class="button" href="{}">Mark Finished</a>', f'finish/{obj.id}/')
         return "Finished"
     status_action.short_description = "Action"
+
+
+@admin.register(StudentsModels.TokenSession)
+class TokenSessionAdmin(admin.ModelAdmin):
+    """نمایش/لغوِ نشست‌های فعال برای superuser (حذفِ ردیف = خروجِ آن دستگاه)."""
+    list_display = ('user', 'device', 'ip_address', 'country', 'created', 'last_used')
+    list_filter = ('device', 'country')
+    search_fields = ('user__username', 'ip_address', 'user_agent')
+    readonly_fields = ('user', 'token_key', 'token_digest', 'ip_address', 'user_agent',
+                       'device', 'country', 'created', 'last_used')
+
+    def has_add_permission(self, request):
+        return False
+
+    # حذف از ادمین = لغوِ واقعیِ توکن (وگرنه فقط متادیتا پاک می‌شد و دستگاه لاگین می‌ماند)
+    def delete_model(self, request, obj):
+        from knox.models import AuthToken
+        AuthToken.objects.filter(pk=obj.token_digest).delete()
+        obj.delete()
+
+    def delete_queryset(self, request, queryset):
+        from knox.models import AuthToken
+        AuthToken.objects.filter(pk__in=list(queryset.values_list('token_digest', flat=True))).delete()
+        queryset.delete()
     

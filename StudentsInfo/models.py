@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User, Group
+from django.utils import timezone
 from ExamsPlatform import models as E_models
 from AssignmentPlatform import models as A_models
 from ClassroomsPlatform import models as C_models
@@ -256,4 +257,35 @@ Group.add_to_class('group_grade',   models.CharField("مقطع",max_length= 8 , 
     ) ,null=True , blank=True))
 
 Group.add_to_class('group_cost',    models.IntegerField("مبلغ کلاس" ,null=True , blank=True))
+
+
+class TokenSession(models.Model):
+    """نشستِ فعالِ متناظر با هر توکنِ Knox (برای پنل «دستگاه‌های فعال»).
+
+    Knox خودش فقط digest/user/created/expiry را نگه می‌دارد؛ این مدل متادیتای
+    قابل‌نمایش (IP، User-Agent، دستگاه، کشور، آخرین‌استفاده) را ذخیره می‌کند.
+
+    عمداً به‌جای FK به مدلِ swappableِ knox، فقط digestِ توکن (=PK آن) را به‌صورت یک
+    فیلدِ ساده نگه می‌داریم: هم از دردسرِ FK به مدلِ swappable (خطای SQLite) پرهیز
+    می‌شود و هم DB-agnostic می‌ماند. «زنده‌بودن» نشست با join به AuthTokenهای فعال
+    تعیین می‌شود؛ ردیف‌های یتیم (توکنشان حذف شده) شبانه با cleanup_tokens پاک می‌شوند.
+    """
+    token_digest = models.CharField("digest توکن", max_length=128, unique=True, db_index=True)
+    token_key    = models.CharField("پیشوند توکن", max_length=25, blank=True, default='')
+    user         = models.ForeignKey(User, on_delete=models.CASCADE,
+                                     related_name='token_sessions', verbose_name="کاربر")
+    ip_address   = models.GenericIPAddressField("آی‌پی", null=True, blank=True)
+    user_agent   = models.TextField("User-Agent", blank=True, default='')
+    device       = models.CharField("دستگاه", max_length=120, blank=True, default='')
+    country      = models.CharField("کشور", max_length=80, blank=True, default='')
+    created      = models.DateTimeField("ورود", default=timezone.now)
+    last_used    = models.DateTimeField("آخرین استفاده", default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ['-last_used']
+        verbose_name = "نشست فعال"
+        verbose_name_plural = "نشست‌های فعال"
+
+    def __str__(self) -> str:
+        return "%s - %s (%s)" % (self.user, self.device or "?", self.ip_address or "?")
 

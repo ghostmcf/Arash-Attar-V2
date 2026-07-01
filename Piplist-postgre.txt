@@ -87,3 +87,4 @@ zope.interface
 PyMuPDF
 psycopg2-binary
 smsir-python
+django-otp

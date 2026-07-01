@@ -58,8 +58,8 @@ class GetScoreTests(TestCase):
         # انتخاب کاربر: [درست، درست، بی‌پاسخ] => 2 درست، 0 غلط، 1 بی‌پاسخ
         score = self._make_score([1, 2, 0])
         score.get_score()
-        # ((2*3 - 0) / (3*3)) * 100 = 66.67
-        self.assertEqual(score.score, Decimal("66.67"))
+        # ((2*3 - 0) / (3*3)) * 100 = 66.67  (float برای سازگاری با SQLite/MySQL)
+        self.assertAlmostEqual(float(score.score), 66.67, places=2)
         self.assertEqual(score.wrong_counts, 0)
         self.assertEqual(score.none_counts, 1)
 
@@ -67,8 +67,8 @@ class GetScoreTests(TestCase):
         # [درست، غلط، درست] => 2 درست، 1 غلط
         score = self._make_score([1, 4, 3])
         score.get_score()
-        # ((2*3 - 1) / 9) * 100 = 55.56
-        self.assertEqual(score.score, Decimal("55.56"))
+        # ((2*3 - 1) / 9) * 100 = 55.56  (float برای سازگاری با SQLite/MySQL)
+        self.assertAlmostEqual(float(score.score), 55.56, places=2)
         self.assertEqual(score.wrong_counts, 1)
         self.assertEqual(score.none_counts, 0)
 

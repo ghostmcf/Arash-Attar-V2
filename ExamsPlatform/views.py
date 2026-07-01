@@ -14,8 +14,9 @@ from django.shortcuts import get_object_or_404
 from . import models ,serializers
 from rest_framework import status
 from django.utils.timezone import localtime
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, inline_serializer
 from drf_spectacular.types import OpenApiTypes
+from rest_framework import serializers as rfs
  
 #  aqn : Active question number
 ##################OPTIMIZE
@@ -135,7 +136,11 @@ def _exam_state_response(score, qlist, qmap, exam_deadline):
     }, status=200)
 
 
-@extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT)
+@extend_schema(
+    request=inline_serializer(name='ExamFlowRequest', fields={
+        'aqn': rfs.IntegerField(required=False, help_text="فقط برای req_type=return: شماره‌ی سوالِ مقصدِ بازگشت"),
+    }),
+    responses=OpenApiTypes.OBJECT)
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def exam_flow(request, examnum, req_type):
@@ -231,7 +236,7 @@ def exam_flow(request, examnum, req_type):
             if score.returns_count <= 0:
                 return Response({"message": "No returns left"}, status=status.HTTP_403_FORBIDDEN)
             try:
-                aqn = int(request.POST.get("aqn"))
+                aqn = int(request.data.get("aqn"))
             except (TypeError, ValueError):
                 return Response({"message": "Invalid question number"}, status=status.HTTP_400_BAD_REQUEST)
             # فقط بازگشت به سوالِ قبلی (نه جلو، نه ندیده) — req 6
@@ -251,7 +256,12 @@ def exam_flow(request, examnum, req_type):
         return _exam_state_response(score, qlist, qmap, exam_deadline)
 
 
-@extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT)
+@extend_schema(
+    request=inline_serializer(name='ExamChoiceRequest', fields={
+        'aqn': rfs.IntegerField(help_text="شماره‌ی سوال"),
+        'answer_number': rfs.IntegerField(required=False, help_text="گزینه‌ی انتخابی (برای command=set)"),
+    }),
+    responses=OpenApiTypes.OBJECT)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def exam_choice(request, examnum, command):
@@ -277,7 +287,7 @@ def exam_choice(request, examnum, command):
             return Response({"message": "Exam time over"}, status=status.HTTP_423_LOCKED)
 
         try:
-            aqn = int(request.POST.get("aqn"))
+            aqn = int(request.data.get("aqn"))
         except (TypeError, ValueError):
             return Response({"message": "Invalid parameters"}, status=status.HTTP_400_BAD_REQUEST)
         if not (1 <= aqn <= len(score.user_choice)):
@@ -288,7 +298,7 @@ def exam_choice(request, examnum, command):
 
         if command == "set":
             try:
-                answer_number = int(request.POST.get("answer_number"))
+                answer_number = int(request.data.get("answer_number"))
             except (TypeError, ValueError):
                 return Response({"message": "Invalid parameters"}, status=status.HTTP_400_BAD_REQUEST)
             score.user_choice[aqn - 1] = answer_number

@@ -11,8 +11,9 @@ import jdatetime
 import pytz
 import logging
 from Frontend.upload_manager import auto_upload, validate_file
-from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, inline_serializer
 from drf_spectacular.types import OpenApiTypes
+from rest_framework import serializers as rfs
 # Create your views here.
 
 @extend_schema_view(
@@ -121,7 +122,11 @@ logger.setLevel(logging.INFO)
 
 
 #   Upload Command + FTPS + Verfication + Log & Admin + Temp Storage
-@extend_schema_view(post=extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT))
+@extend_schema_view(post=extend_schema(
+    request=inline_serializer(name='AssignmentFileUploadRequest', fields={
+        'assignment_file': rfs.FileField(help_text='فایل PDF تکلیف دانش‌آموز'),
+    }),
+    responses=OpenApiTypes.OBJECT))
 class FileUploadView(views.APIView):
     parser_classes = (parsers.MultiPartParser, parsers.FormParser)
     permission_classes = [IsAuthenticated]

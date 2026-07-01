@@ -5,23 +5,35 @@ from . import models ,serializers
 from rest_framework import status,viewsets
 from django.db.models import Count
 from rest_framework.permissions import IsAuthenticated
-from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, inline_serializer
 from drf_spectacular.types import OpenApiTypes
+from rest_framework import serializers as rfs
+
+_ID_PARAM = OpenApiParameter('id', OpenApiTypes.STR, OpenApiParameter.PATH)
 
 
 @extend_schema_view(
-    retrieve=extend_schema(
-        parameters=[OpenApiParameter('id', OpenApiTypes.STR, OpenApiParameter.PATH)],
-        responses=OpenApiTypes.OBJECT,
-    ),
-    get_by_headline=extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT),
+    retrieve=extend_schema(parameters=[_ID_PARAM], responses=OpenApiTypes.OBJECT),
+    get_by_headline=extend_schema(
+        request=inline_serializer(name='ClassByHeadlineRequest', fields={
+            'headline': rfs.CharField(),
+        }),
+        responses=OpenApiTypes.OBJECT),
     headlines=extend_schema(responses=OpenApiTypes.OBJECT),
     update_presence=extend_schema(
-        parameters=[OpenApiParameter('id', OpenApiTypes.STR, OpenApiParameter.PATH)],
-        request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT),
+        parameters=[_ID_PARAM],
+        request=inline_serializer(name='UpdatePresenceRequest', fields={
+            'classroom_presence': rfs.ListField(child=rfs.FloatField(), help_text='لیست درصد حضور هر محتوا'),
+        }),
+        responses=OpenApiTypes.OBJECT),
     update_video_progress=extend_schema(
-        parameters=[OpenApiParameter('id', OpenApiTypes.STR, OpenApiParameter.PATH)],
-        request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT),
+        parameters=[_ID_PARAM],
+        request=inline_serializer(name='UpdateVideoProgressRequest', fields={
+            'content_index': rfs.IntegerField(help_text='1..5'),
+            'position': rfs.FloatField(help_text='ثانیه‌ی فعلی پخش'),
+            'duration': rfs.FloatField(required=False, help_text='مدت کل ویدیو (ثانیه)'),
+        }),
+        responses=OpenApiTypes.OBJECT),
 )
 class ClassroomViewset(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
@@ -30,7 +42,7 @@ class ClassroomViewset(viewsets.ViewSet):
     def get_by_headline(self, request):
         try:
             group = request.user.groups.all()[0]
-            class_list = group.classroom_set.filter(classroom_headline=request.POST.get("headline")).order_by('-classroom_status','-classroom_available_time_end',)
+            class_list = group.classroom_set.filter(classroom_headline=request.data.get("headline")).order_by('-classroom_status','-classroom_available_time_end',)
         except:
             return Response(status=status.HTTP_404_NOT_FOUND)
         else:
